@@ -2,7 +2,6 @@
   <img src="./assets/first-degree-logo.svg" alt="First Degree" width="420" />
 </p>
 
-# First Degree
 
 Understand the health patterns that run in your family.
 
