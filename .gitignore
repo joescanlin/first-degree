@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.vite/
+*.log
+.DS_Store
+first_degree_logo_pack/
+internal/
