@@ -1526,24 +1526,12 @@ function OverviewTab({ profile, artifact, doctorNote }: { profile: FamilyHistory
 }
 
 function MedCanonHandoffTab({ handoff }: { handoff: MedCanonHandoffPackage }) {
-  const carePreferenceChips = [
-    handoff.patient_context_snapshot.preferred_language
-      ? `Language: ${handoff.patient_context_snapshot.preferred_language}`
-      : null,
-    handoff.patient_context_snapshot.pronouns ? `Pronouns: ${handoff.patient_context_snapshot.pronouns}` : null,
-    handoff.patient_context_snapshot.timezone ? `Timezone: ${handoff.patient_context_snapshot.timezone}` : null,
-    handoff.patient_context_snapshot.preferred_pharmacy
-      ? `Pharmacy: ${handoff.patient_context_snapshot.preferred_pharmacy}`
-      : null,
-    handoff.patient_context_snapshot.visit_goal ? `Goal: ${handoff.patient_context_snapshot.visit_goal}` : null,
-  ].filter(Boolean) as string[];
-
   return (
     <div className="summary-grid handoff-grid">
       <div className="summary-main-column">
         <article className="data-card accent-card handoff-hero-card">
           <p className="eyebrow">MedCanon-ready handoff</p>
-          <h3>{handoff.clinician_brief}</h3>
+          <h3>{handoff.profile_brief}</h3>
           <p className="muted-copy">{handoff.package_purpose}</p>
           <div className="chip-row">
             {handoff.family_snapshot.notable_clusters.length === 0 ? (
@@ -1566,6 +1554,10 @@ function MedCanonHandoffTab({ handoff }: { handoff: MedCanonHandoffPackage }) {
               <strong>{handoff.family_snapshot.first_degree_flag_count}</strong>
             </div>
             <div className="snapshot-card">
+              <span>Durable facts</span>
+              <strong>{handoff.family_snapshot.durable_fact_count}</strong>
+            </div>
+            <div className="snapshot-card">
               <span>Ready to share</span>
               <strong>{handoff.family_snapshot.ready_to_share_fact_count}</strong>
             </div>
@@ -1574,28 +1566,59 @@ function MedCanonHandoffTab({ handoff }: { handoff: MedCanonHandoffPackage }) {
               <strong>{handoff.family_snapshot.needs_followup_fact_count}</strong>
             </div>
             <div className="snapshot-card">
-              <span>Patient memory</span>
-              <strong>{handoff.family_snapshot.patient_context_item_count}</strong>
+              <span>Recent changes</span>
+              <strong>{handoff.family_snapshot.recent_change_count}</strong>
             </div>
             <div className="snapshot-card">
               <span>Context entries</span>
-              <strong>{handoff.medcanon_clinical_context.length}</strong>
+              <strong>{handoff.clinical_context.length}</strong>
             </div>
             <div className="snapshot-card">
               <span>Open follow-ups</span>
               <strong>{handoff.open_questions.length}</strong>
             </div>
           </div>
-          <p className="muted-copy">Generated from the latest saved family-history draft at {formatTimestamp(handoff.generated_at)}.</p>
+          <p className="muted-copy">Generated from the latest saved context draft at {formatTimestamp(handoff.generated_at)}.</p>
+        </article>
+
+        <article className="data-card">
+          <p className="eyebrow">Durable facts</p>
+          {handoff.durable_facts.length === 0 ? (
+            <p className="muted-copy">No durable facts have been packaged yet. Add patient memory or family-history items to make the handoff more useful.</p>
+          ) : (
+            <div className="handoff-signal-stack">
+              {handoff.durable_facts.map((fact) => (
+                <div key={fact.id} className="handoff-signal-card">
+                  <div className="question-card-top">
+                    <span className="cluster-tag">{fact.domain.replace(/_/g, ' ')}</span>
+                    <span className={`cluster-tag ${fact.review_required ? 'warning-chip' : ''}`}>
+                      {fact.review_status.replace(/_/g, ' ')}
+                    </span>
+                  </div>
+                  <h4>{fact.label}</h4>
+                  <p>{fact.value}</p>
+                  <div className="chip-row">
+                    <span className="chip">{fact.source.replace(/_/g, ' ')}</span>
+                    <span className="chip">{fact.confidence} confidence</span>
+                    {fact.tags.slice(0, 3).map((tag) => (
+                      <span key={`${fact.id}-${tag}`} className="chip">
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </article>
 
         <article className="data-card">
           <p className="eyebrow">Clinician-facing family signals</p>
-          {handoff.salient_family_history.length === 0 ? (
+          {handoff.family_history_flags.length === 0 ? (
             <p className="muted-copy">No family-history flags have been packaged yet. Add relatives and conditions to make the handoff more useful.</p>
           ) : (
             <div className="handoff-signal-stack">
-              {handoff.salient_family_history.map((signal) => (
+              {handoff.family_history_flags.map((signal) => (
                 <div key={signal.id} className="handoff-signal-card">
                   <div className="question-card-top">
                     <span className="cluster-tag">{signal.degree}</span>
@@ -1619,40 +1642,31 @@ function MedCanonHandoffTab({ handoff }: { handoff: MedCanonHandoffPackage }) {
         </article>
 
         <article className="data-card">
-          <p className="eyebrow">Patient memory</p>
-          {handoff.patient_memory.length === 0 ? (
-            <p className="muted-copy">No patient memory items have been packaged yet.</p>
+          <p className="eyebrow">Recent changes</p>
+          {handoff.recent_changes.length === 0 ? (
+            <p className="muted-copy">No recent changes have been packaged yet.</p>
           ) : (
             <div className="handoff-signal-stack">
-              {handoff.patient_memory.map((item) => (
-                <div key={item.id} className="handoff-signal-card">
+              {handoff.recent_changes.map((change) => (
+                <div key={change.id} className="handoff-signal-card">
                   <div className="question-card-top">
-                    <span className="cluster-tag">{item.kind.replace(/_/g, ' ')}</span>
-                    <span className={`cluster-tag ${item.review_required ? 'warning-chip' : ''}`}>
-                      {item.review_status.replace(/_/g, ' ')}
+                    <span className="cluster-tag">{change.domain.replace(/_/g, ' ')}</span>
+                    <span className={`cluster-tag ${change.review_required ? 'warning-chip' : ''}`}>
+                      {change.review_required ? 'needs review' : formatTimestamp(change.changed_at)}
                     </span>
                   </div>
-                  <h4>{item.label}</h4>
-                  <p>{item.handoff_line}</p>
+                  <h4>{change.label}</h4>
+                  <p>{change.summary}</p>
                 </div>
               ))}
             </div>
           )}
-          {carePreferenceChips.length > 0 ? (
-            <div className="chip-row compact-note-list">
-              {carePreferenceChips.map((chip) => (
-                <span key={chip} className="chip">
-                  {chip}
-                </span>
-              ))}
-            </div>
-          ) : null}
         </article>
 
         <article className="data-card">
           <p className="eyebrow">MedCanon `clinical_context`</p>
           <div className="context-entry-list">
-            {handoff.medcanon_clinical_context.map((entry) => (
+            {handoff.clinical_context.map((entry) => (
               <article key={`${entry.type}-${entry.source_id ?? entry.value}`} className="context-entry-card">
                 <div className="context-entry-top">
                   <span className="context-type-pill">{entry.type}</span>
@@ -1686,7 +1700,7 @@ function MedCanonHandoffTab({ handoff }: { handoff: MedCanonHandoffPackage }) {
         <article className="data-card">
           <p className="eyebrow">Handoff notes</p>
           <ul className="clean-list compact-list">
-            <li>This is the compact package First Degree would hand to MedCanon, not the full raw graph or draft form state.</li>
+            <li>This package is structured around `profile_brief`, `durable_facts`, `recent_changes`, `open_questions`, and downstream `clinical_context`.</li>
             {handoff.guardrails.map((guardrail) => (
               <li key={guardrail}>{guardrail}</li>
             ))}
@@ -1696,7 +1710,7 @@ function MedCanonHandoffTab({ handoff }: { handoff: MedCanonHandoffPackage }) {
         <article className="data-card">
           <p className="eyebrow">Visit scenarios</p>
           <div className="scenario-stack">
-            {handoff.encounter_scenarios.map((scenario) => (
+            {handoff.visit_scenarios.map((scenario) => (
               <article key={scenario.id} className="scenario-card">
                 <h4>{scenario.title}</h4>
                 <p className="scenario-prompt">Patient says: “{scenario.patient_prompt}”</p>

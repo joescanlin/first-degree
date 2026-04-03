@@ -20,9 +20,11 @@ type HandoffContextType =
   | 'family_history_pattern'
   | 'family_history_open_question'
   | 'patient_memory_item'
-  | 'care_preference';
+  | 'care_preference'
+  | 'recent_change';
 type HandoffStatus = 'patient_reported' | 'needs_followup';
 type HandoffCategory = 'family_history' | 'patient_context';
+export type HandoffDomain = 'family_history' | PersonalContextItem['kind'] | 'care_preference';
 
 export interface MedCanonClinicalContextEntry {
   type: HandoffContextType;
@@ -73,6 +75,28 @@ export interface HandoffPatientContextItem {
   last_updated_at: string;
 }
 
+export interface HandoffDurableFact {
+  id: string;
+  domain: HandoffDomain;
+  label: string;
+  value: string;
+  source: FamilyHistoryFact['source'];
+  confidence: FamilyHistoryFact['confidence'];
+  review_status: FamilyHistoryFact['reviewStatus'];
+  review_required: boolean;
+  recorded_at: string;
+  tags: string[];
+}
+
+export interface HandoffRecentChange {
+  id: string;
+  domain: HandoffDomain;
+  label: string;
+  changed_at: string;
+  summary: string;
+  review_required: boolean;
+}
+
 export interface MockEncounterScenario {
   id: string;
   title: string;
@@ -82,7 +106,7 @@ export interface MockEncounterScenario {
 }
 
 export interface MedCanonHandoffPackage {
-  package_version: 'first_degree_medcanon_handoff_v1';
+  package_version: 'first_degree_context_handoff_v2';
   generated_at: string;
   package_purpose: string;
   patient: {
@@ -97,30 +121,21 @@ export interface MedCanonHandoffPackage {
     second_degree_relative_count: number;
     first_degree_flag_count: number;
     second_degree_flag_count: number;
-    documented_fact_count: number;
+    durable_fact_count: number;
     ready_to_share_fact_count: number;
     needs_followup_fact_count: number;
-    patient_context_item_count: number;
+    recent_change_count: number;
     notable_clusters: string[];
   };
-  patient_context_snapshot: {
-    medications: HandoffPatientContextItem[];
-    allergies: HandoffPatientContextItem[];
-    chronic_conditions: HandoffPatientContextItem[];
-    preferred_pharmacy: string;
-    preferred_language: string;
-    pronouns: string;
-    timezone: string;
-    visit_goal: string;
-  };
-  clinician_brief: string;
-  salient_family_history: HandoffFamilySignal[];
-  patient_memory: HandoffPatientContextItem[];
+  profile_brief: string;
+  durable_facts: HandoffDurableFact[];
+  family_history_flags: HandoffFamilySignal[];
   pattern_summaries: string[];
   open_questions: HandoffOpenQuestion[];
-  encounter_scenarios: MockEncounterScenario[];
+  recent_changes: HandoffRecentChange[];
+  visit_scenarios: MockEncounterScenario[];
   guardrails: string[];
-  medcanon_clinical_context: MedCanonClinicalContextEntry[];
+  clinical_context: MedCanonClinicalContextEntry[];
 }
 
 interface ResolvedSignal {
@@ -222,6 +237,14 @@ function personalContextLine(item: PersonalContextItem): string {
   return `${kindLabel}: ${item.label.trim()}.${detailLine}${sourceLine}${confidenceLine}${followupLine}`.replace(/\s+/g, ' ').trim();
 }
 
+function compactFamilyFactLabel(signal: HandoffFamilySignal): string {
+  return `${signal.relative} · ${signal.condition}`;
+}
+
+function patientContextLabel(item: HandoffPatientContextItem): string {
+  return `${formatPersonalContextKindLabel(item.kind)} · ${item.label}`;
+}
+
 function clusterWeight(artifact: SummaryArtifact, clusterId: ClusterId): number {
   const counts = artifact.clusterCounts[clusterId];
   return counts.first * 3 + counts.second * 2;
@@ -261,6 +284,7 @@ function buildClinicianBrief(
   prominentClusters: string[],
   signals: HandoffFamilySignal[],
   patientMemory: HandoffPatientContextItem[],
+  durableFacts: HandoffDurableFact[],
   openQuestions: HandoffOpenQuestion[],
 ): string {
   const patientName = profile.personal.nameOrLabel?.trim() || 'Patient';
@@ -281,6 +305,7 @@ function buildClinicianBrief(
     artifact.documentedFactCount > 0
       ? `${artifact.readyToShareFactCount} documented ${artifact.readyToShareFactCount === 1 ? 'fact is' : 'facts are'} marked ready to share and ${artifact.needsFollowupFactCount} ${artifact.needsFollowupFactCount === 1 ? 'fact still needs' : 'facts still need'} follow-up.`
       : null,
+    durableFacts.length > 0 ? `${durableFacts.length} durable context ${durableFacts.length === 1 ? 'fact is' : 'facts are'} packaged for downstream use.` : null,
     patientMemory.length > 0
       ? `Patient memory also includes ${artifact.patientContextCounts.medications} ${artifact.patientContextCounts.medications === 1 ? 'medication' : 'medications'}, ${artifact.patientContextCounts.allergies} ${artifact.patientContextCounts.allergies === 1 ? 'allergy' : 'allergies'}, and ${artifact.patientContextCounts.chronicConditions} chronic ${artifact.patientContextCounts.chronicConditions === 1 ? 'condition' : 'conditions'}.`
       : null,
@@ -371,41 +396,106 @@ export function buildMedCanonHandoffPackage(
   });
 
   const patientMemory = patientMemoryItems.map((item) => mapPatientMemoryItem(item));
-  const clinicianBrief = buildClinicianBrief(profile, artifact, prominentClusters, salientSignals, patientMemory, openQuestions);
   const sourcePrefix = `fd-${slugify(profile.personal.nameOrLabel || 'patient')}`;
   const recordedAt = profile.updatedAt;
   const packageNeedsReview = artifact.needsFollowupFactCount > 0 || openQuestions.length > 0;
-  const carePreferenceParts = [
-    profile.personal.preferredLanguage?.trim() ? `Preferred language: ${profile.personal.preferredLanguage.trim()}.` : null,
-    profile.personal.pronouns?.trim() ? `Pronouns: ${profile.personal.pronouns.trim()}.` : null,
-    profile.personal.timezone?.trim() ? `Timezone: ${profile.personal.timezone.trim()}.` : null,
-    profile.personal.preferredPharmacy?.trim() ? `Preferred pharmacy: ${profile.personal.preferredPharmacy.trim()}.` : null,
-    profile.personal.visitGoal?.trim() ? `Visit goal: ${profile.personal.visitGoal.trim()}.` : null,
-  ].filter(Boolean) as string[];
+  const carePreferenceFacts: HandoffDurableFact[] = [
+    profile.personal.preferredLanguage?.trim()
+      ? {
+          id: `${sourcePrefix}-preferred-language`,
+          domain: 'care_preference',
+          label: 'Preferred language',
+          value: `Preferred language: ${profile.personal.preferredLanguage.trim()}.`,
+          source: 'patient_memory',
+          confidence: 'certain',
+          review_status: 'ready_to_share',
+          review_required: false,
+          recorded_at: recordedAt,
+          tags: ['patient_context', 'care_preference', 'preferred_language'],
+        }
+      : null,
+    profile.personal.pronouns?.trim()
+      ? {
+          id: `${sourcePrefix}-pronouns`,
+          domain: 'care_preference',
+          label: 'Pronouns',
+          value: `Pronouns: ${profile.personal.pronouns.trim()}.`,
+          source: 'patient_memory',
+          confidence: 'certain',
+          review_status: 'ready_to_share',
+          review_required: false,
+          recorded_at: recordedAt,
+          tags: ['patient_context', 'care_preference', 'pronouns'],
+        }
+      : null,
+    profile.personal.timezone?.trim()
+      ? {
+          id: `${sourcePrefix}-timezone`,
+          domain: 'care_preference',
+          label: 'Timezone',
+          value: `Timezone: ${profile.personal.timezone.trim()}.`,
+          source: 'patient_memory',
+          confidence: 'certain',
+          review_status: 'ready_to_share',
+          review_required: false,
+          recorded_at: recordedAt,
+          tags: ['patient_context', 'care_preference', 'timezone'],
+        }
+      : null,
+    profile.personal.preferredPharmacy?.trim()
+      ? {
+          id: `${sourcePrefix}-preferred-pharmacy`,
+          domain: 'care_preference',
+          label: 'Preferred pharmacy',
+          value: `Preferred pharmacy: ${profile.personal.preferredPharmacy.trim()}.`,
+          source: 'patient_memory',
+          confidence: 'certain',
+          review_status: 'ready_to_share',
+          review_required: false,
+          recorded_at: recordedAt,
+          tags: ['patient_context', 'care_preference', 'preferred_pharmacy'],
+        }
+      : null,
+    profile.personal.visitGoal?.trim()
+      ? {
+          id: `${sourcePrefix}-visit-goal`,
+          domain: 'care_preference',
+          label: 'Visit goal',
+          value: `Visit goal: ${profile.personal.visitGoal.trim()}.`,
+          source: 'patient_memory',
+          confidence: 'certain',
+          review_status: 'ready_to_share',
+          review_required: false,
+          recorded_at: recordedAt,
+          tags: ['patient_context', 'care_preference', 'visit_goal'],
+        }
+      : null,
+  ].filter(Boolean) as HandoffDurableFact[];
 
-  const medcanonClinicalContext: MedCanonClinicalContextEntry[] = [
-    {
-      type: 'profile_brief',
-      label: 'Patient context brief',
-      value: clinicianBrief,
-      origin: 'first_degree_context',
-      source_id: `${sourcePrefix}-brief`,
-      recorded_at: recordedAt,
-      review_required: packageNeedsReview,
-      status: packageNeedsReview ? 'needs_followup' : 'patient_reported',
-      category: 'patient_context',
-      tags: ['family_history', 'patient_context', 'profile_brief', ...prominentClusterIds, packageNeedsReview ? 'needs_followup' : 'ready_to_share'],
-    },
+  const durableFacts: HandoffDurableFact[] = [
+    ...patientMemory.map((item) => ({
+      id: item.id,
+      domain: item.kind,
+      label: patientContextLabel(item),
+      value: item.handoff_line,
+      source: item.source,
+      confidence: item.confidence,
+      review_status: item.review_status,
+      review_required: item.review_required,
+      recorded_at: item.last_updated_at,
+      tags: ['patient_context', item.kind, `source_${item.source}`, `confidence_${item.confidence}`, item.review_status],
+    })),
+    ...carePreferenceFacts,
     ...salientSignals.map((signal) => ({
-      type: 'family_history_flag' as const,
-      label: `${signal.degree} family history`,
+      id: signal.id,
+      domain: 'family_history' as const,
+      label: compactFamilyFactLabel(signal),
       value: signal.handoff_line,
-      origin: 'first_degree_context' as const,
-      source_id: signal.id,
-      recorded_at: signal.last_updated_at,
+      source: signal.source,
+      confidence: signal.confidence,
+      review_status: signal.review_status,
       review_required: signal.review_required,
-      status: signal.review_required ? 'needs_followup' as const : 'patient_reported' as const,
-      category: 'family_history' as const,
+      recorded_at: signal.last_updated_at,
       tags: [
         'family_history',
         signal.cluster.toLowerCase().replace(/\s+/g, '_'),
@@ -414,6 +504,55 @@ export function buildMedCanonHandoffPackage(
         `confidence_${signal.confidence}`,
         signal.review_status,
       ],
+    })),
+  ];
+
+  const profileBrief = buildClinicianBrief(profile, artifact, prominentClusters, salientSignals, patientMemory, durableFacts, openQuestions);
+  const recentChanges: HandoffRecentChange[] = [
+    ...salientSignals.map((signal) => ({
+      id: `recent-${signal.id}`,
+      domain: 'family_history' as const,
+      label: compactFamilyFactLabel(signal),
+      changed_at: signal.last_updated_at,
+      summary: signal.handoff_line,
+      review_required: signal.review_required,
+    })),
+    ...patientMemory.map((item) => ({
+      id: `recent-${item.id}`,
+      domain: item.kind,
+      label: patientContextLabel(item),
+      changed_at: item.last_updated_at,
+      summary: item.handoff_line,
+      review_required: item.review_required,
+    })),
+  ]
+    .sort((left, right) => Date.parse(right.changed_at) - Date.parse(left.changed_at))
+    .slice(0, 8);
+
+  const clinicalContext: MedCanonClinicalContextEntry[] = [
+    {
+      type: 'profile_brief',
+      label: 'Patient context brief',
+      value: profileBrief,
+      origin: 'first_degree_context',
+      source_id: `${sourcePrefix}-brief`,
+      recorded_at: recordedAt,
+      review_required: packageNeedsReview,
+      status: packageNeedsReview ? 'needs_followup' : 'patient_reported',
+      category: 'patient_context',
+      tags: ['family_history', 'patient_context', 'profile_brief', ...prominentClusterIds, packageNeedsReview ? 'needs_followup' : 'ready_to_share'],
+    },
+    ...durableFacts.map((fact) => ({
+      type: fact.domain === 'family_history' ? 'family_history_flag' as const : fact.domain === 'care_preference' ? 'care_preference' as const : 'patient_memory_item' as const,
+      label: fact.label,
+      value: fact.value,
+      origin: 'first_degree_context' as const,
+      source_id: fact.id,
+      recorded_at: fact.recorded_at,
+      review_required: fact.review_required,
+      status: fact.review_required ? 'needs_followup' as const : 'patient_reported' as const,
+      category: fact.domain === 'family_history' ? 'family_history' as const : 'patient_context' as const,
+      tags: fact.tags,
     })),
     ...artifact.keyPatterns.slice(0, 3).map((pattern, index) => ({
       type: 'family_history_pattern' as const,
@@ -427,40 +566,18 @@ export function buildMedCanonHandoffPackage(
       category: 'family_history' as const,
       tags: ['family_history', ...prominentClusterIds, packageNeedsReview ? 'needs_followup' : 'ready_to_share'],
     })),
-    ...patientMemory.map((item) => ({
-      type: 'patient_memory_item' as const,
-      label: formatPersonalContextKindLabel(item.kind),
-      value: item.handoff_line,
+    ...recentChanges.slice(0, 4).map((change) => ({
+      type: 'recent_change' as const,
+      label: `Recent change · ${change.label}`,
+      value: change.summary,
       origin: 'first_degree_context' as const,
-      source_id: item.id,
-      recorded_at: item.last_updated_at,
-      review_required: item.review_required,
-      status: item.review_required ? 'needs_followup' as const : 'patient_reported' as const,
-      category: 'patient_context' as const,
-      tags: [
-        'patient_context',
-        item.kind,
-        `source_${item.source}`,
-        `confidence_${item.confidence}`,
-        item.review_status,
-      ],
+      source_id: change.id,
+      recorded_at: change.changed_at,
+      review_required: change.review_required,
+      status: change.review_required ? 'needs_followup' as const : 'patient_reported' as const,
+      category: change.domain === 'family_history' ? 'family_history' as const : 'patient_context' as const,
+      tags: [change.domain, 'recent_change', change.review_required ? 'needs_followup' : 'ready_to_share'],
     })),
-    ...(carePreferenceParts.length > 0
-      ? [
-          {
-            type: 'care_preference' as const,
-            label: 'Care preferences',
-            value: carePreferenceParts.join(' '),
-            origin: 'first_degree_context' as const,
-            source_id: `${sourcePrefix}-preferences`,
-            recorded_at: recordedAt,
-            review_required: false,
-            status: 'patient_reported' as const,
-            category: 'patient_context' as const,
-            tags: ['patient_context', 'care_preferences'],
-          },
-        ]
-      : []),
     ...openQuestions.map((question) => ({
       type: 'family_history_open_question' as const,
       label: 'Open family-history question',
@@ -476,9 +593,9 @@ export function buildMedCanonHandoffPackage(
   ];
 
   return {
-    package_version: 'first_degree_medcanon_handoff_v1',
+    package_version: 'first_degree_context_handoff_v2',
     generated_at: new Date().toISOString(),
-    package_purpose: 'Compact patient-memory and family-history context package intended to enrich MedCanon clinician handoff and follow-up framing.',
+    package_purpose: 'Structured patient-memory and family-history context package intended to enrich MedCanon clinician handoff and durable context reuse.',
     patient: {
       display_name: profile.personal.nameOrLabel?.trim() || 'Patient',
       age_range: profile.personal.ageRange || 'Not set',
@@ -491,33 +608,24 @@ export function buildMedCanonHandoffPackage(
       second_degree_relative_count: secondDegreeMembers.length,
       first_degree_flag_count: artifact.firstDegreeFlags.length,
       second_degree_flag_count: artifact.secondDegreeFlags.length,
-      documented_fact_count: artifact.documentedFactCount,
+      durable_fact_count: durableFacts.length,
       ready_to_share_fact_count: artifact.readyToShareFactCount,
       needs_followup_fact_count: artifact.needsFollowupFactCount,
-      patient_context_item_count: artifact.patientContextCounts.total,
+      recent_change_count: recentChanges.length,
       notable_clusters: prominentClusters,
     },
-    patient_context_snapshot: {
-      medications: medications.map((item) => mapPatientMemoryItem(item)),
-      allergies: allergies.map((item) => mapPatientMemoryItem(item)),
-      chronic_conditions: chronicConditions.map((item) => mapPatientMemoryItem(item)),
-      preferred_pharmacy: profile.personal.preferredPharmacy?.trim() || '',
-      preferred_language: profile.personal.preferredLanguage?.trim() || '',
-      pronouns: profile.personal.pronouns?.trim() || '',
-      timezone: profile.personal.timezone?.trim() || '',
-      visit_goal: profile.personal.visitGoal?.trim() || '',
-    },
-    clinician_brief: clinicianBrief,
-    salient_family_history: salientSignals,
-    patient_memory: patientMemory,
+    profile_brief: profileBrief,
+    durable_facts: durableFacts,
+    family_history_flags: salientSignals,
     pattern_summaries: artifact.keyPatterns.slice(0, 4),
     open_questions: openQuestions,
-    encounter_scenarios: buildMockEncounterScenarios(prominentClusterIds),
+    recent_changes: recentChanges,
+    visit_scenarios: buildMockEncounterScenarios(prominentClusterIds),
     guardrails: [
       'This package is patient-reported context, not a diagnosis list for the patient.',
       'Unknown details and missing ages stay explicit instead of being filled in.',
       'The intended use is better clinician review, follow-up questions, and context handoff.',
     ],
-    medcanon_clinical_context: medcanonClinicalContext,
+    clinical_context: clinicalContext,
   };
 }
