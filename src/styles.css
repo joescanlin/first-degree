@@ -503,6 +503,63 @@ h3 {
   gap: 12px;
 }
 
+.about-context-grid,
+.patient-memory-editor-grid {
+  display: grid;
+  gap: 18px;
+}
+
+.about-context-grid {
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+}
+
+.patient-memory-editor-grid {
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.personal-context-card,
+.personal-context-item-card {
+  display: grid;
+  gap: 14px;
+}
+
+.personal-context-header {
+  align-items: flex-start;
+}
+
+.personal-context-empty {
+  border: 1px dashed #d7e0ee;
+  border-radius: 16px;
+  padding: 14px;
+  background: #fbfdff;
+}
+
+.personal-context-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.personal-context-item-card {
+  border: 1px solid #dce5f1;
+  border-radius: 18px;
+  padding: 14px;
+  background: #fbfdff;
+}
+
+.personal-context-item-top {
+  align-items: center;
+}
+
+.personal-context-item-top strong {
+  color: #2f4164;
+}
+
+.personal-context-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .condition-panel,
 .summary-panel {
   display: grid;
@@ -1254,6 +1311,7 @@ h3 {
   .overview-hero-grid,
   .overview-detail-grid,
   .overview-visual-grid,
+  .about-context-grid,
   .header-chip-panel,
   .metric-grid,
   .form-grid.two-up,
@@ -1283,17 +1341,20 @@ h3 {
   .header-chip-panel,
   .metric-grid,
   .form-grid.two-up,
+  .about-context-grid,
   .question-grid,
   .member-grid,
   .condition-card-grid,
   .cluster-card-grid,
   .sample-grid,
+  .patient-memory-editor-grid,
   .question-cluster-grid,
   .snapshot-grid {
     grid-template-columns: 1fr;
   }
 
-  .fact-review-grid {
+  .fact-review-grid,
+  .personal-context-field-grid {
     grid-template-columns: 1fr;
   }
 

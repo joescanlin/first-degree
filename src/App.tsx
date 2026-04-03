@@ -9,11 +9,14 @@ import {
   countPresentFactsForMember,
   createBlankProfile,
   createFactRecord,
+  createPersonalContextItem,
   createSibling,
+  getCompletePersonalContextItems,
   getFact,
   getTrackedMembers,
   parseProfile,
   touchFact,
+  touchPersonalContextItem,
   touchProfile,
   type FamilyHistoryFact,
   type FamilyHistoryProfile,
@@ -22,6 +25,8 @@ import {
   type FactReviewStatus,
   type FactSource,
   type FactStatus,
+  type PersonalContextItem,
+  type PersonalContextKind,
   type StepId,
 } from './lib/profile';
 import { SAMPLE_PROFILES } from './lib/samples';
@@ -38,6 +43,7 @@ const FEATURED_DEMO_SAMPLE_ID = 'medcanon-demo';
 
 type SummaryTab = (typeof SUMMARY_TABS)[number];
 type GraphClusterFilter = (typeof GRAPH_CLUSTER_FILTERS)[number];
+type PersonalCollectionKey = 'medications' | 'allergies' | 'chronicConditions';
 
 const SUMMARY_TAB_LABELS: Record<SummaryTab, string> = {
   overview: 'Overview',
@@ -230,6 +236,46 @@ function App() {
     });
   };
 
+  const addPersonalContextEntry = (collection: PersonalCollectionKey, kind: PersonalContextKind) => {
+    setProfile((current) =>
+      touchProfile({
+        ...current,
+        personal: {
+          ...current.personal,
+          [collection]: [...current.personal[collection], createPersonalContextItem(kind)],
+        },
+      }),
+    );
+  };
+
+  const updatePersonalContextEntry = (
+    collection: PersonalCollectionKey,
+    itemId: string,
+    patch: Partial<Omit<PersonalContextItem, 'id' | 'kind'>>,
+  ) => {
+    setProfile((current) =>
+      touchProfile({
+        ...current,
+        personal: {
+          ...current.personal,
+          [collection]: current.personal[collection].map((item) => (item.id === itemId ? touchPersonalContextItem(item, patch) : item)),
+        },
+      }),
+    );
+  };
+
+  const removePersonalContextEntry = (collection: PersonalCollectionKey, itemId: string) => {
+    setProfile((current) =>
+      touchProfile({
+        ...current,
+        personal: {
+          ...current.personal,
+          [collection]: current.personal[collection].filter((item) => item.id !== itemId),
+        },
+      }),
+    );
+  };
+
   const goNext = () => {
     const next = STEP_ORDER[currentStepIndex + 1];
     if (next) {
@@ -392,16 +438,16 @@ function App() {
         <div className="header-brand">
           <img className="brand-lockup" src={logo} alt="First Degree" />
           <div>
-            <p className="eyebrow">Family health context workspace</p>
-            <h1>Build a family history you can actually use</h1>
+            <p className="eyebrow">Clinical context workspace</p>
+            <h1>Build health context you can actually reuse</h1>
             <p className="lede">
-              Start with parents, siblings, and grandparents. Capture what you know, surface what is missing, and turn it into a clear health-context artifact.
+              Start with family history, then add the current medications, allergies, conditions, and care preferences that make future visits more personalized.
             </p>
           </div>
         </div>
         <div className="header-chip-panel">
           <MetricChip label="Tracked relatives" value={trackedMembers.length.toString()} />
-          <MetricChip label="Known condition flags" value={(artifact.firstDegreeFlags.length + artifact.secondDegreeFlags.length).toString()} />
+          <MetricChip label="Context items" value={artifact.documentedFactCount.toString()} />
           <MetricChip label="Open follow-ups" value={artifact.missingQuestions.length.toString()} />
         </div>
         <div className="header-meta-row">
@@ -432,7 +478,7 @@ function App() {
             <div className="intro-grid">
               <div>
                 <p className="eyebrow">Start simple</p>
-                <h2>Most family history lives in memory, not in charts.</h2>
+                <h2>Most useful health context lives in memory, not in charts.</h2>
                 <p>
                   First Degree is built to turn that memory into structured health context. The current app captures what you know, keeps uncertainty explicit, and turns it into a clearer artifact for future care.
                 </p>
@@ -477,6 +523,7 @@ function App() {
                 <h3>What this build includes</h3>
                 <ul className="clean-list">
                   <li>Guided family member onboarding</li>
+                  <li>Lightweight patient memory capture</li>
                   <li>Bulk condition entry by cluster</li>
                   <li>A graph-style family and cluster view</li>
                   <li>A MedCanon handoff view for clinician context</li>
@@ -497,8 +544,8 @@ function App() {
           <section className="panel form-panel">
             <SectionHeader
               eyebrow="Step 1"
-              title="About you"
-              description="This is just enough context to personalize the summary and the final artifact."
+              title="About you and current context"
+              description="Capture the minimum current-context details that will make future MedCanon handoffs more useful."
             />
             <div className="form-grid two-up">
               <label className="field">
@@ -536,6 +583,110 @@ function App() {
                   placeholder="Ex: Annual physical, family planning, just getting organized"
                 />
               </label>
+            </div>
+            <div className="about-context-grid">
+              <article className="data-card">
+                <p className="eyebrow">Care preferences</p>
+                <h3>Add the details you would want carried into a visit</h3>
+                <div className="form-grid two-up">
+                  <label className="field">
+                    <span>Pronouns</span>
+                    <input
+                      value={profile.personal.pronouns}
+                      onChange={(event) => handlePersonalChange('pronouns', event.target.value)}
+                      placeholder="Ex: she/her"
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Preferred language</span>
+                    <input
+                      value={profile.personal.preferredLanguage}
+                      onChange={(event) => handlePersonalChange('preferredLanguage', event.target.value)}
+                      placeholder="Ex: English"
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Timezone</span>
+                    <input
+                      value={profile.personal.timezone}
+                      onChange={(event) => handlePersonalChange('timezone', event.target.value)}
+                      placeholder="Ex: America/New_York"
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Preferred pharmacy</span>
+                    <input
+                      value={profile.personal.preferredPharmacy}
+                      onChange={(event) => handlePersonalChange('preferredPharmacy', event.target.value)}
+                      placeholder="Ex: Walgreens on 14th Street"
+                    />
+                  </label>
+                  <label className="field wide">
+                    <span>Main goal for the next visit</span>
+                    <input
+                      value={profile.personal.visitGoal}
+                      onChange={(event) => handlePersonalChange('visitGoal', event.target.value)}
+                      placeholder="Ex: Keep migraine management and family cancer context visible in my intake"
+                    />
+                  </label>
+                </div>
+              </article>
+
+              <article className="data-card">
+                <p className="eyebrow">Patient memory</p>
+                <h3>Build the durable context you usually end up repeating every visit</h3>
+                <ul className="clean-list compact-list muted-list">
+                  <li>Current medications and how you take them</li>
+                  <li>Allergies and the reaction if you know it</li>
+                  <li>Chronic conditions you want a clinician to keep in view</li>
+                  <li>Preferences like language, pharmacy, timezone, and visit goals</li>
+                </ul>
+              </article>
+            </div>
+
+            <div className="patient-memory-editor-grid">
+              <PersonalContextListEditor
+                title="Current medications"
+                description="Keep this fast. Add the medication name, then note the dose or frequency only if it helps."
+                items={profile.personal.medications}
+                addLabel="Add medication"
+                emptyState="No medications added yet."
+                nameLabel="Medication"
+                namePlaceholder="Ex: Rosuvastatin"
+                detailLabel="Dose or frequency"
+                detailPlaceholder="Ex: 10 mg nightly"
+                onAdd={() => addPersonalContextEntry('medications', 'medication')}
+                onChange={(itemId, patch) => updatePersonalContextEntry('medications', itemId, patch)}
+                onRemove={(itemId) => removePersonalContextEntry('medications', itemId)}
+              />
+              <PersonalContextListEditor
+                title="Allergies"
+                description="List what you react to and what the reaction was if you know it."
+                items={profile.personal.allergies}
+                addLabel="Add allergy"
+                emptyState="No allergies added yet."
+                nameLabel="Allergy"
+                namePlaceholder="Ex: Penicillin"
+                detailLabel="Reaction"
+                detailPlaceholder="Ex: Rash"
+                onAdd={() => addPersonalContextEntry('allergies', 'allergy')}
+                onChange={(itemId, patch) => updatePersonalContextEntry('allergies', itemId, patch)}
+                onRemove={(itemId) => removePersonalContextEntry('allergies', itemId)}
+              />
+              <PersonalContextListEditor
+                title="Chronic conditions"
+                description="Track the ongoing conditions you want visible in intake and follow-up visits."
+                items={profile.personal.chronicConditions}
+                addLabel="Add condition"
+                emptyState="No chronic conditions added yet."
+                nameLabel="Condition"
+                namePlaceholder="Ex: Asthma"
+                detailLabel="Current detail"
+                detailPlaceholder="Ex: Mild intermittent"
+                onAdd={() => addPersonalContextEntry('chronicConditions', 'condition')}
+                onChange={(itemId, patch) => updatePersonalContextEntry('chronicConditions', itemId, patch)}
+                onRemove={(itemId) => removePersonalContextEntry('chronicConditions', itemId)}
+              />
             </div>
             <StepActions onBack={goBack} onNext={goNext} nextLabel="Continue to family members" />
           </section>
@@ -690,8 +841,8 @@ function App() {
             <div className="summary-header">
               <SectionHeader
                 eyebrow="Summary workspace"
-                title="Family graph, clustered patterns, and clinician-ready artifacts"
-                description="This view is intentionally information-dense and more scientific than a typical consumer wellness UI."
+                title="Patient memory, family graph, and clinician-ready artifacts"
+                description="This workspace combines durable patient context with family-history structure so the eventual MedCanon handoff is easier to trust."
               />
               <div className="summary-actions wrap-actions">
                 <button className="secondary-button compact-button" onClick={copyDoctorNote}>
@@ -884,6 +1035,122 @@ function MemberCard({
   );
 }
 
+function PersonalContextListEditor({
+  title,
+  description,
+  items,
+  addLabel,
+  emptyState,
+  nameLabel,
+  namePlaceholder,
+  detailLabel,
+  detailPlaceholder,
+  onAdd,
+  onChange,
+  onRemove,
+}: {
+  title: string;
+  description: string;
+  items: PersonalContextItem[];
+  addLabel: string;
+  emptyState: string;
+  nameLabel: string;
+  namePlaceholder: string;
+  detailLabel: string;
+  detailPlaceholder: string;
+  onAdd: () => void;
+  onChange: (itemId: string, patch: Partial<Omit<PersonalContextItem, 'id' | 'kind'>>) => void;
+  onRemove: (itemId: string) => void;
+}) {
+  return (
+    <article className="data-card personal-context-card">
+      <div className="section-row personal-context-header">
+        <div>
+          <p className="eyebrow">Patient memory</p>
+          <h3>{title}</h3>
+          <p className="muted-copy">{description}</p>
+        </div>
+        <button className="secondary-button compact-button" onClick={onAdd}>
+          {addLabel}
+        </button>
+      </div>
+
+      {items.length === 0 ? <div className="empty-card personal-context-empty">{emptyState}</div> : null}
+
+      <div className="personal-context-stack">
+        {items.map((item) => (
+          <article key={item.id} className="personal-context-item-card">
+            <div className="section-row personal-context-item-top">
+              <strong>{item.label.trim() || nameLabel}</strong>
+              <button className="ghost-button compact-button" onClick={() => onRemove(item.id)}>
+                Remove
+              </button>
+            </div>
+            <div className="personal-context-field-grid">
+              <label className="field">
+                <span>{nameLabel}</span>
+                <input
+                  value={item.label}
+                  onChange={(event) => onChange(item.id, { label: event.target.value })}
+                  placeholder={namePlaceholder}
+                />
+              </label>
+              <label className="field">
+                <span>{detailLabel}</span>
+                <input
+                  value={item.detail ?? ''}
+                  onChange={(event) => onChange(item.id, { detail: event.target.value })}
+                  placeholder={detailPlaceholder}
+                />
+              </label>
+            </div>
+            <div className="fact-review-grid">
+              <label className="field compact-field">
+                <span>Source</span>
+                <select value={item.source} onChange={(event) => onChange(item.id, { source: event.target.value as FactSource })}>
+                  {FACT_SOURCE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field compact-field">
+                <span>Confidence</span>
+                <select value={item.confidence} onChange={(event) => onChange(item.id, { confidence: event.target.value as FactConfidence })}>
+                  {FACT_CONFIDENCE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field compact-field">
+                <span>Share status</span>
+                <select value={item.reviewStatus} onChange={(event) => onChange(item.id, { reviewStatus: event.target.value as FactReviewStatus })}>
+                  {FACT_REVIEW_STATUS_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <label className="field fact-note-field">
+              <span>Note for later review</span>
+              <input
+                value={item.note ?? ''}
+                onChange={(event) => onChange(item.id, { note: event.target.value })}
+                placeholder="Ex: Dose from memory, confirm in chart later"
+              />
+            </label>
+          </article>
+        ))}
+      </div>
+    </article>
+  );
+}
+
 function ConditionClusterEditor({
   clusterId,
   member,
@@ -1069,6 +1336,14 @@ function OverviewTab({ profile, artifact, doctorNote }: { profile: FamilyHistory
   const clusterSignals = CLUSTER_ORDER.filter(
     (clusterId) => artifact.clusterCounts[clusterId].first + artifact.clusterCounts[clusterId].second > 0,
   );
+  const medications = getCompletePersonalContextItems(profile.personal.medications);
+  const allergies = getCompletePersonalContextItems(profile.personal.allergies);
+  const chronicConditions = getCompletePersonalContextItems(profile.personal.chronicConditions);
+  const patientMemoryChips = [
+    ...medications.map((item) => `Med: ${item.label}`),
+    ...allergies.map((item) => `Allergy: ${item.label}`),
+    ...chronicConditions.map((item) => `Condition: ${item.label}`),
+  ];
 
   return (
     <div className="overview-layout">
@@ -1076,6 +1351,7 @@ function OverviewTab({ profile, artifact, doctorNote }: { profile: FamilyHistory
         <MetricCard label="First-degree flags" value={artifact.firstDegreeFlags.length} />
         <MetricCard label="Second-degree flags" value={artifact.secondDegreeFlags.length} />
         <MetricCard label="Cluster signals" value={clusterSignals.length} />
+        <MetricCard label="Patient memory items" value={artifact.patientContextCounts.total} />
         <MetricCard label="Review-ready facts" value={artifact.readyToShareFactCount} />
         <MetricCard label="Needs review" value={artifact.needsFollowupFactCount} />
         <MetricCard label="Follow-up prompts" value={artifact.missingQuestions.length} />
@@ -1149,6 +1425,48 @@ function OverviewTab({ profile, artifact, doctorNote }: { profile: FamilyHistory
 
         <div className="overview-side-stack">
           <article className="data-card">
+            <p className="eyebrow">Patient memory</p>
+            <dl className="profile-facts">
+              <div>
+                <dt>Medications</dt>
+                <dd>{artifact.patientContextCounts.medications}</dd>
+              </div>
+              <div>
+                <dt>Allergies</dt>
+                <dd>{artifact.patientContextCounts.allergies}</dd>
+              </div>
+              <div>
+                <dt>Chronic conditions</dt>
+                <dd>{artifact.patientContextCounts.chronicConditions}</dd>
+              </div>
+              <div>
+                <dt>Preferred pharmacy</dt>
+                <dd>{profile.personal.preferredPharmacy || 'Not set'}</dd>
+              </div>
+              <div>
+                <dt>Language / pronouns</dt>
+                <dd>
+                  {[profile.personal.preferredLanguage, profile.personal.pronouns].filter(Boolean).join(' · ') || 'Not set'}
+                </dd>
+              </div>
+            </dl>
+            {patientMemoryChips.length > 0 ? (
+              <div className="chip-row compact-note-list">
+                {patientMemoryChips.map((chip) => (
+                  <span key={chip} className="chip">
+                    {chip}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            <ul className="clean-list compact-list compact-note-list">
+              {artifact.patientContextNotes.slice(0, 4).map((note) => (
+                <li key={note}>{note}</li>
+              ))}
+            </ul>
+          </article>
+
+          <article className="data-card">
             <p className="eyebrow">Review readiness</p>
             <dl className="profile-facts">
               <div>
@@ -1208,6 +1526,18 @@ function OverviewTab({ profile, artifact, doctorNote }: { profile: FamilyHistory
 }
 
 function MedCanonHandoffTab({ handoff }: { handoff: MedCanonHandoffPackage }) {
+  const carePreferenceChips = [
+    handoff.patient_context_snapshot.preferred_language
+      ? `Language: ${handoff.patient_context_snapshot.preferred_language}`
+      : null,
+    handoff.patient_context_snapshot.pronouns ? `Pronouns: ${handoff.patient_context_snapshot.pronouns}` : null,
+    handoff.patient_context_snapshot.timezone ? `Timezone: ${handoff.patient_context_snapshot.timezone}` : null,
+    handoff.patient_context_snapshot.preferred_pharmacy
+      ? `Pharmacy: ${handoff.patient_context_snapshot.preferred_pharmacy}`
+      : null,
+    handoff.patient_context_snapshot.visit_goal ? `Goal: ${handoff.patient_context_snapshot.visit_goal}` : null,
+  ].filter(Boolean) as string[];
+
   return (
     <div className="summary-grid handoff-grid">
       <div className="summary-main-column">
@@ -1242,6 +1572,10 @@ function MedCanonHandoffTab({ handoff }: { handoff: MedCanonHandoffPackage }) {
             <div className="snapshot-card">
               <span>Need review</span>
               <strong>{handoff.family_snapshot.needs_followup_fact_count}</strong>
+            </div>
+            <div className="snapshot-card">
+              <span>Patient memory</span>
+              <strong>{handoff.family_snapshot.patient_context_item_count}</strong>
             </div>
             <div className="snapshot-card">
               <span>Context entries</span>
@@ -1285,6 +1619,37 @@ function MedCanonHandoffTab({ handoff }: { handoff: MedCanonHandoffPackage }) {
         </article>
 
         <article className="data-card">
+          <p className="eyebrow">Patient memory</p>
+          {handoff.patient_memory.length === 0 ? (
+            <p className="muted-copy">No patient memory items have been packaged yet.</p>
+          ) : (
+            <div className="handoff-signal-stack">
+              {handoff.patient_memory.map((item) => (
+                <div key={item.id} className="handoff-signal-card">
+                  <div className="question-card-top">
+                    <span className="cluster-tag">{item.kind.replace(/_/g, ' ')}</span>
+                    <span className={`cluster-tag ${item.review_required ? 'warning-chip' : ''}`}>
+                      {item.review_status.replace(/_/g, ' ')}
+                    </span>
+                  </div>
+                  <h4>{item.label}</h4>
+                  <p>{item.handoff_line}</p>
+                </div>
+              ))}
+            </div>
+          )}
+          {carePreferenceChips.length > 0 ? (
+            <div className="chip-row compact-note-list">
+              {carePreferenceChips.map((chip) => (
+                <span key={chip} className="chip">
+                  {chip}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </article>
+
+        <article className="data-card">
           <p className="eyebrow">MedCanon `clinical_context`</p>
           <div className="context-entry-list">
             {handoff.medcanon_clinical_context.map((entry) => (
@@ -1321,7 +1686,7 @@ function MedCanonHandoffTab({ handoff }: { handoff: MedCanonHandoffPackage }) {
         <article className="data-card">
           <p className="eyebrow">Handoff notes</p>
           <ul className="clean-list compact-list">
-            <li>This is the compact package First Degree would hand to MedCanon, not the full raw family graph.</li>
+            <li>This is the compact package First Degree would hand to MedCanon, not the full raw graph or draft form state.</li>
             {handoff.guardrails.map((guardrail) => (
               <li key={guardrail}>{guardrail}</li>
             ))}

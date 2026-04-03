@@ -1,12 +1,15 @@
 import {
   createBlankProfile,
   createFactRecord,
+  createPersonalContextItem,
   createSibling,
+  touchPersonalContextItem,
   touchFact,
   touchProfile,
   type FamilyHistoryFact,
   type FamilyHistoryProfile,
   type FamilyMember,
+  type PersonalContextItem,
 } from './profile';
 import { type ConditionId } from './taxonomy';
 
@@ -34,6 +37,19 @@ function fact(
 ): FamilyHistoryFact {
   return touchFact(createFactRecord(memberId, conditionId, 'present'), {
     ageAtOnset: ageAtOnset ?? '',
+    ...patch,
+  });
+}
+
+function contextItem(
+  kind: PersonalContextItem['kind'],
+  label: string,
+  detail = '',
+  patch: Partial<Omit<PersonalContextItem, 'id' | 'kind' | 'label'>> = {},
+): PersonalContextItem {
+  return touchPersonalContextItem(createPersonalContextItem(kind), {
+    label,
+    detail,
     ...patch,
   });
 }
@@ -76,6 +92,14 @@ function cardioSample(): FamilyHistoryProfile {
       ageRange: '30-39',
       sex: 'unknown',
       reasonForStarting: 'Annual physical prep',
+      pronouns: 'he/him',
+      preferredLanguage: 'English',
+      timezone: 'America/New_York',
+      preferredPharmacy: 'CVS on Broad Street',
+      visitGoal: 'Bring current cardiovascular family context into my preventive visit.',
+      medications: [contextItem('medication', 'Atorvastatin', '20 mg nightly')],
+      allergies: [contextItem('allergy', 'Penicillin', 'Rash as a child', { confidence: 'uncertain', reviewStatus: 'needs_followup' })],
+      chronicConditions: [contextItem('condition', 'High cholesterol', 'Managed with medication')],
     },
     members: [...members, sibling],
     facts,
@@ -107,6 +131,14 @@ function cancerSample(): FamilyHistoryProfile {
       ageRange: '30-39',
       sex: 'female',
       reasonForStarting: 'Family planning and preventive care',
+      pronouns: 'she/her',
+      preferredLanguage: 'English',
+      timezone: 'America/Chicago',
+      preferredPharmacy: 'Walgreens near Lakeview',
+      visitGoal: 'Make sure preventive screening discussions reflect both family and personal context.',
+      medications: [contextItem('medication', 'Prenatal vitamin', 'Daily')],
+      allergies: [contextItem('allergy', 'Sulfa antibiotics', 'Hives')],
+      chronicConditions: [contextItem('condition', 'Migraine history', 'A few flares each month')],
     },
     members: [...members, sibling],
     facts: [
@@ -141,6 +173,14 @@ function mixedSample(): FamilyHistoryProfile {
       ageRange: '18-29',
       sex: 'unknown',
       reasonForStarting: 'Getting organized before a new primary care visit',
+      pronouns: 'they/them',
+      preferredLanguage: 'English',
+      timezone: 'America/Los_Angeles',
+      preferredPharmacy: '',
+      visitGoal: 'Have a clean starting profile before meeting a new PCP.',
+      medications: [],
+      allergies: [contextItem('allergy', 'Latex', 'Skin irritation', { confidence: 'likely' })],
+      chronicConditions: [],
     },
     members,
     facts: [
@@ -184,6 +224,22 @@ function medCanonDemoSample(): FamilyHistoryProfile {
       ageRange: '30-39',
       sex: 'female',
       reasonForStarting: 'Preparing for more personalized telehealth visits',
+      pronouns: 'she/her',
+      preferredLanguage: 'English',
+      timezone: 'America/New_York',
+      preferredPharmacy: 'Walgreens, 14th Street',
+      visitGoal: 'Give MedCanon enough durable context to personalize preventive and acute telehealth visits.',
+      medications: [
+        contextItem('medication', 'Rosuvastatin', '10 mg nightly', { source: 'medical_record', confidence: 'certain' }),
+        contextItem('medication', 'Albuterol inhaler', 'As needed for exercise-induced symptoms', { source: 'patient_memory', confidence: 'likely' }),
+      ],
+      allergies: [
+        contextItem('allergy', 'Penicillin', 'Rash', { source: 'family_report', confidence: 'likely' }),
+      ],
+      chronicConditions: [
+        contextItem('condition', 'Asthma', 'Mild intermittent', { source: 'medical_record', confidence: 'certain' }),
+        contextItem('condition', 'Migraine', 'A few episodes most months', { source: 'patient_memory', confidence: 'likely' }),
+      ],
     },
     members: [...members, sibling],
     facts: [

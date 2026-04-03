@@ -1,5 +1,13 @@
 import { CLUSTERS, CLUSTER_ORDER, CONDITIONS_BY_ID, type ClusterId, type ConditionId } from './taxonomy';
-import { factNeedsFollowup, getFact, getTrackedMembers, type FamilyHistoryProfile, type FamilyMember } from './profile';
+import {
+  factNeedsFollowup,
+  getCompletePersonalContextItems,
+  getFact,
+  getTrackedMembers,
+  personalContextItemNeedsFollowup,
+  type FamilyHistoryProfile,
+  type FamilyMember,
+} from './profile';
 
 export interface MissingQuestion {
   id: string;
@@ -18,6 +26,13 @@ export interface SummaryArtifact {
   documentedFactCount: number;
   readyToShareFactCount: number;
   needsFollowupFactCount: number;
+  patientContextCounts: {
+    medications: number;
+    allergies: number;
+    chronicConditions: number;
+    total: number;
+  };
+  patientContextNotes: string[];
   missingQuestions: MissingQuestion[];
   doctorVisitNotes: string[];
   incompletenessNotes: string[];
@@ -53,11 +68,20 @@ export function buildSummaryArtifact(profile: FamilyHistoryProfile): SummaryArti
   const firstDegreeMembers = members.filter((member) => member.degree === 'first');
   const secondDegreeMembers = members.filter((member) => member.degree === 'second');
   const trackedMemberIds = new Set(members.map((member) => member.id));
+  const medications = getCompletePersonalContextItems(profile.personal.medications);
+  const allergies = getCompletePersonalContextItems(profile.personal.allergies);
+  const chronicConditions = getCompletePersonalContextItems(profile.personal.chronicConditions);
+  const patientMemoryItems = [...medications, ...allergies, ...chronicConditions];
   const documentedFacts = profile.facts.filter(
     (fact) => fact.status !== 'unanswered' && trackedMemberIds.has(fact.memberId),
   );
   const readyToShareFacts = documentedFacts.filter((fact) => !factNeedsFollowup(fact));
   const needsFollowupFacts = documentedFacts.filter((fact) => factNeedsFollowup(fact));
+  const readyToShareMemoryItems = patientMemoryItems.filter((item) => !personalContextItemNeedsFollowup(item));
+  const needsFollowupMemoryItems = patientMemoryItems.filter((item) => personalContextItemNeedsFollowup(item));
+  const documentedContextCount = documentedFacts.length + patientMemoryItems.length;
+  const readyContextCount = readyToShareFacts.length + readyToShareMemoryItems.length;
+  const needsFollowupCount = needsFollowupFacts.length + needsFollowupMemoryItems.length;
 
   const firstDegreeFlags = new Set<ConditionId>();
   const secondDegreeFlags = new Set<ConditionId>();
@@ -66,6 +90,7 @@ export function buildSummaryArtifact(profile: FamilyHistoryProfile): SummaryArti
   const doctorVisitNotes: string[] = [];
   const incompletenessNotes: string[] = [];
   const reviewabilityNotes: string[] = [];
+  const patientContextNotes: string[] = [];
   const clusterCounts = Object.fromEntries(
     CLUSTER_ORDER.map((cluster) => [cluster, { first: 0, second: 0 }]),
   ) as Record<ClusterId, { first: number; second: number }>;
@@ -158,17 +183,58 @@ export function buildSummaryArtifact(profile: FamilyHistoryProfile): SummaryArti
     incompletenessNotes.push('Cancer history is present, but some age-at-diagnosis details are still missing.');
   }
 
-  if (documentedFacts.length === 0) {
-    reviewabilityNotes.push('No documented family-history facts are marked ready to share yet.');
-  } else if (needsFollowupFacts.length === 0) {
-    reviewabilityNotes.push(`All ${documentedFacts.length} documented ${pluralize(documentedFacts.length, 'fact')} are marked ready to share.`);
+  const patientContextCountParts: string[] = [];
+  if (medications.length > 0) {
+    patientContextCountParts.push(`${medications.length} ${pluralize(medications.length, 'medication')}`);
+  }
+  if (allergies.length > 0) {
+    patientContextCountParts.push(`${allergies.length} ${pluralize(allergies.length, 'allergy', 'allergies')}`);
+  }
+  if (chronicConditions.length > 0) {
+    patientContextCountParts.push(`${chronicConditions.length} ${pluralize(chronicConditions.length, 'chronic condition')}`);
+  }
+
+  if (patientContextCountParts.length > 0) {
+    patientContextNotes.push(`Patient memory also includes ${joinLabels(patientContextCountParts)}.`);
+  }
+  if (medications.length > 0) {
+    patientContextNotes.push(`Current medications: ${joinLabels(medications.map((item) => item.label))}.`);
+  }
+  if (allergies.length > 0) {
+    patientContextNotes.push(`Reported allergies include ${joinLabels(allergies.map((item) => item.label.toLowerCase()))}.`);
+  }
+  if (chronicConditions.length > 0) {
+    patientContextNotes.push(`Chronic conditions tracked: ${joinLabels(chronicConditions.map((item) => item.label.toLowerCase()))}.`);
+  }
+  if (profile.personal.visitGoal?.trim()) {
+    patientContextNotes.push(`Visit goal: ${profile.personal.visitGoal.trim()}`);
+  }
+  if (profile.personal.preferredLanguage?.trim() || profile.personal.pronouns?.trim() || profile.personal.preferredPharmacy?.trim()) {
+    const preferenceParts = [
+      profile.personal.preferredLanguage?.trim() ? `language ${profile.personal.preferredLanguage.trim()}` : null,
+      profile.personal.pronouns?.trim() ? `pronouns ${profile.personal.pronouns.trim()}` : null,
+      profile.personal.preferredPharmacy?.trim() ? `pharmacy ${profile.personal.preferredPharmacy.trim()}` : null,
+    ].filter(Boolean) as string[];
+    if (preferenceParts.length > 0) {
+      patientContextNotes.push(`Care preferences documented: ${joinLabels(preferenceParts)}.`);
+    }
+  }
+
+  if (patientMemoryItems.length === 0) {
+    incompletenessNotes.push('No current medications, allergies, or chronic conditions are recorded yet.');
+  }
+
+  if (documentedContextCount === 0) {
+    reviewabilityNotes.push('No documented context items are marked ready to share yet.');
+  } else if (needsFollowupCount === 0) {
+    reviewabilityNotes.push(`All ${documentedContextCount} documented ${pluralize(documentedContextCount, 'context item')} are marked ready to share.`);
   } else {
     reviewabilityNotes.push(
-      `${needsFollowupFacts.length} documented ${pluralize(needsFollowupFacts.length, 'fact')} still need source or confidence follow-up before reuse.`,
+      `${needsFollowupCount} documented ${pluralize(needsFollowupCount, 'context item')} still need source or confidence follow-up before reuse.`,
     );
-    if (readyToShareFacts.length > 0) {
+    if (readyContextCount > 0) {
       reviewabilityNotes.push(
-        `${readyToShareFacts.length} ${pluralize(readyToShareFacts.length, 'fact')} already look ready to share in a clinician handoff.`,
+        `${readyContextCount} ${pluralize(readyContextCount, 'context item')} already look ready to share in a clinician handoff.`,
       );
     }
   }
@@ -186,8 +252,17 @@ export function buildSummaryArtifact(profile: FamilyHistoryProfile): SummaryArti
   if (missingQuestions.length > 0) {
     doctorVisitNotes.push('Bring up that some family-history details are still incomplete, especially age at diagnosis where it is known to matter.');
   }
-  if (needsFollowupFacts.length > 0) {
-    doctorVisitNotes.push('Mention which family-history items are approximate, family-reported, or still need confirmation.');
+  if (patientMemoryItems.length > 0) {
+    doctorVisitNotes.push('Use the patient memory layer for current medications, allergies, and chronic conditions during intake.');
+  }
+  if (profile.personal.visitGoal?.trim()) {
+    doctorVisitNotes.push(`Lead with the patient goal: ${profile.personal.visitGoal.trim()}`);
+  }
+  if (profile.personal.preferredPharmacy?.trim()) {
+    doctorVisitNotes.push(`Preferred pharmacy is ${profile.personal.preferredPharmacy.trim()}.`);
+  }
+  if (needsFollowupCount > 0) {
+    doctorVisitNotes.push('Mention which context items are approximate, family-reported, or still need confirmation.');
   }
   if (doctorVisitNotes.length === 0) {
     doctorVisitNotes.push('Bring this summary to future visits as a starting point, then keep adding details over time.');
@@ -195,7 +270,7 @@ export function buildSummaryArtifact(profile: FamilyHistoryProfile): SummaryArti
 
   const plainLanguageSummary = [
     keyPatterns[0],
-    keyPatterns[1],
+    patientContextNotes[0] ?? keyPatterns[1],
     incompletenessNotes[0],
   ]
     .filter(Boolean)
@@ -207,9 +282,16 @@ export function buildSummaryArtifact(profile: FamilyHistoryProfile): SummaryArti
     secondDegreeFlags: [...secondDegreeFlags],
     keyPatterns,
     clusterCounts,
-    documentedFactCount: documentedFacts.length,
-    readyToShareFactCount: readyToShareFacts.length,
-    needsFollowupFactCount: needsFollowupFacts.length,
+    documentedFactCount: documentedContextCount,
+    readyToShareFactCount: readyContextCount,
+    needsFollowupFactCount: needsFollowupCount,
+    patientContextCounts: {
+      medications: medications.length,
+      allergies: allergies.length,
+      chronicConditions: chronicConditions.length,
+      total: patientMemoryItems.length,
+    },
+    patientContextNotes,
     missingQuestions: missingQuestions.slice(0, 8),
     doctorVisitNotes,
     incompletenessNotes,
@@ -219,5 +301,5 @@ export function buildSummaryArtifact(profile: FamilyHistoryProfile): SummaryArti
 
 export function buildDoctorNote(profile: FamilyHistoryProfile, artifact: SummaryArtifact): string {
   const name = profile.personal.nameOrLabel?.trim() || 'Patient';
-  return `${name} family history summary: ${artifact.plainLanguageSummary} ${artifact.doctorVisitNotes.join(' ')}`.trim();
+  return `${name} health context summary: ${artifact.plainLanguageSummary} ${artifact.doctorVisitNotes.join(' ')}`.trim();
 }
