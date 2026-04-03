@@ -31,7 +31,12 @@ import {
 } from './lib/profile';
 import { SAMPLE_PROFILES } from './lib/samples';
 import { clearSavedProfile, loadProfile, saveProfile } from './lib/storage';
-import { buildMedCanonHandoffPackage, type MedCanonHandoffPackage } from './lib/handoff';
+import {
+  VISIT_MODE_OPTIONS,
+  buildMedCanonHandoffPackage,
+  type MedCanonHandoffPackage,
+  type VisitMode,
+} from './lib/handoff';
 import { buildDoctorNote, buildSummaryArtifact, type MissingQuestion, type SummaryArtifact } from './lib/summary';
 import { ClusterKnowledgeWorkbench, ClusterSignalBars, ConditionClusterGraph } from './lib/visuals';
 import { CLUSTERS, CLUSTER_ORDER, CONDITIONS, CONDITIONS_BY_ID, type ClusterId, type ConditionId } from './lib/taxonomy';
@@ -79,13 +84,17 @@ function App() {
   const [selectedMemberId, setSelectedMemberId] = useState<string>('');
   const [summaryTab, setSummaryTab] = useState<SummaryTab>('overview');
   const [activeGraphCluster, setActiveGraphCluster] = useState<GraphClusterFilter>('all');
+  const [handoffVisitMode, setHandoffVisitMode] = useState<VisitMode>('general_intake');
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const importRef = useRef<HTMLInputElement | null>(null);
 
   const trackedMembers = useMemo(() => getTrackedMembers(profile), [profile]);
   const artifact = useMemo(() => buildSummaryArtifact(profile), [profile]);
   const doctorNote = useMemo(() => buildDoctorNote(profile, artifact), [profile, artifact]);
-  const medCanonHandoff = useMemo(() => buildMedCanonHandoffPackage(profile, artifact), [profile, artifact]);
+  const medCanonHandoff = useMemo(
+    () => buildMedCanonHandoffPackage(profile, artifact, handoffVisitMode),
+    [profile, artifact, handoffVisitMode],
+  );
   const currentStepIndex = STEP_ORDER.indexOf(step);
 
   useEffect(() => {
@@ -302,6 +311,7 @@ function App() {
     setSummaryTab('overview');
     setStep('intro');
     setActiveGraphCluster('all');
+    setHandoffVisitMode('general_intake');
     setFeedbackMessage('Draft reset');
   };
 
@@ -425,6 +435,7 @@ function App() {
     setStep(destination);
     setSummaryTab(nextSummaryTab ?? (destination === 'summary' ? 'overview' : summaryTab));
     setActiveGraphCluster('all');
+    setHandoffVisitMode('general_intake');
     setFeedbackMessage(`${sample.label} loaded`);
   };
 
@@ -885,7 +896,9 @@ function App() {
             </div>
 
             {summaryTab === 'overview' ? <OverviewTab profile={profile} artifact={artifact} doctorNote={doctorNote} /> : null}
-            {summaryTab === 'handoff' ? <MedCanonHandoffTab handoff={medCanonHandoff} /> : null}
+            {summaryTab === 'handoff' ? (
+              <MedCanonHandoffTab handoff={medCanonHandoff} visitMode={handoffVisitMode} setVisitMode={setHandoffVisitMode} />
+            ) : null}
             {summaryTab === 'graph' ? (
               <FamilyGraphTab
                 profile={profile}
@@ -1525,10 +1538,42 @@ function OverviewTab({ profile, artifact, doctorNote }: { profile: FamilyHistory
   );
 }
 
-function MedCanonHandoffTab({ handoff }: { handoff: MedCanonHandoffPackage }) {
+function MedCanonHandoffTab({
+  handoff,
+  visitMode,
+  setVisitMode,
+}: {
+  handoff: MedCanonHandoffPackage;
+  visitMode: VisitMode;
+  setVisitMode: (visitMode: VisitMode) => void;
+}) {
   return (
     <div className="summary-grid handoff-grid">
       <div className="summary-main-column">
+        <article className="data-card">
+          <p className="eyebrow">Visit focus</p>
+          <div className="graph-filter-row">
+            {VISIT_MODE_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                className={`summary-tab mini-tab ${visitMode === option.value ? 'active' : ''}`}
+                onClick={() => setVisitMode(option.value)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <h3>{handoff.visit_focus.label}</h3>
+          <p className="muted-copy">{handoff.visit_focus.summary}</p>
+          <div className="chip-row">
+            {handoff.visit_focus.priority_labels.map((label) => (
+              <span key={label} className="chip">
+                {label}
+              </span>
+            ))}
+          </div>
+        </article>
+
         <article className="data-card accent-card handoff-hero-card">
           <p className="eyebrow">MedCanon-ready handoff</p>
           <h3>{handoff.profile_brief}</h3>
@@ -1597,6 +1642,7 @@ function MedCanonHandoffTab({ handoff }: { handoff: MedCanonHandoffPackage }) {
                   </div>
                   <h4>{fact.label}</h4>
                   <p>{fact.value}</p>
+                  <p className="muted-copy">{fact.relevance_reason}</p>
                   <div className="chip-row">
                     <span className="chip">{fact.source.replace(/_/g, ' ')}</span>
                     <span className="chip">{fact.confidence} confidence</span>
@@ -1628,6 +1674,7 @@ function MedCanonHandoffTab({ handoff }: { handoff: MedCanonHandoffPackage }) {
                   </div>
                   <h4>{signal.relative}</h4>
                   <p>{signal.handoff_line}</p>
+                  <p className="muted-copy">{signal.relevance_reason}</p>
                   <div className="chip-row">
                     <span className="chip">{signal.source.replace(/_/g, ' ')}</span>
                     <span className="chip">{signal.confidence} confidence</span>
@@ -1657,6 +1704,7 @@ function MedCanonHandoffTab({ handoff }: { handoff: MedCanonHandoffPackage }) {
                   </div>
                   <h4>{change.label}</h4>
                   <p>{change.summary}</p>
+                  <p className="muted-copy">Relevance score {change.relevance_score}</p>
                 </div>
               ))}
             </div>
@@ -1701,6 +1749,7 @@ function MedCanonHandoffTab({ handoff }: { handoff: MedCanonHandoffPackage }) {
           <p className="eyebrow">Handoff notes</p>
           <ul className="clean-list compact-list">
             <li>This package is structured around `profile_brief`, `durable_facts`, `recent_changes`, `open_questions`, and downstream `clinical_context`.</li>
+            <li>The selected visit mode changes which facts rise to the top and which context entries MedCanon sees first.</li>
             {handoff.guardrails.map((guardrail) => (
               <li key={guardrail}>{guardrail}</li>
             ))}
@@ -1731,10 +1780,13 @@ function MedCanonHandoffTab({ handoff }: { handoff: MedCanonHandoffPackage }) {
                 <article key={question.id} className="question-card">
                   <div className="question-card-top">
                     <span className={`priority-badge ${question.priority}`}>{question.priority}</span>
-                    <span className="cluster-tag">Family detail</span>
+                    <span className="cluster-tag" style={{ color: CLUSTERS[question.cluster].color }}>
+                      {CLUSTERS[question.cluster].label}
+                    </span>
                   </div>
                   <h4>{question.prompt}</h4>
                   <p>{question.reason}</p>
+                  <p className="muted-copy">{question.relevance_reason}</p>
                 </article>
               ))}
             </div>
