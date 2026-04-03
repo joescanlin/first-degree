@@ -2,14 +2,19 @@ import { CLUSTERS, CLUSTER_ORDER, CONDITIONS_BY_ID, type ClusterId, type Conditi
 import {
   factNeedsFollowup,
   formatAlcoholUseLabel,
+  formatFactConfidenceLabel,
+  formatFactSourceLabel,
+  formatPersonalContextKindLabel,
   formatPregnancyContextLabel,
   formatTobaccoNicotineStatusLabel,
   getCompletePersonalContextItems,
   getFact,
   getTrackedMembers,
   personalContextItemNeedsFollowup,
+  type FamilyHistoryFact,
   type FamilyHistoryProfile,
   type FamilyMember,
+  type PersonalContextItem,
 } from './profile';
 
 export interface MissingQuestion {
@@ -18,6 +23,35 @@ export interface MissingQuestion {
   reason: string;
   priority: 'high' | 'medium';
   cluster: ClusterId;
+}
+
+export type MemoryTimelineStatus = 'ready_to_share' | 'needs_followup' | 'open_question';
+
+export interface MemoryTimelineItem {
+  id: string;
+  title: string;
+  detail: string;
+  timestamp: string;
+  status: MemoryTimelineStatus;
+  tags: string[];
+}
+
+export interface MemoryTimelineSection {
+  id: 'recent_changes' | 'durable_facts' | 'family_discoveries' | 'open_questions';
+  label: string;
+  description: string;
+  items: MemoryTimelineItem[];
+}
+
+export interface MemoryTimelineArtifact {
+  lastUpdatedAt: string;
+  readyToShareCount: number;
+  needsFollowupCount: number;
+  recentChangeCount: number;
+  durableFactCount: number;
+  familyDiscoveryCount: number;
+  openQuestionCount: number;
+  sections: MemoryTimelineSection[];
 }
 
 export interface SummaryArtifact {
@@ -40,6 +74,7 @@ export interface SummaryArtifact {
   doctorVisitNotes: string[];
   incompletenessNotes: string[];
   reviewabilityNotes: string[];
+  memoryTimeline: MemoryTimelineArtifact;
 }
 
 function joinLabels(labels: string[]): string {
@@ -66,11 +101,51 @@ function pluralize(count: number, singular: string, plural = `${singular}s`): st
   return count === 1 ? singular : plural;
 }
 
+function sortTimelineItems(left: MemoryTimelineItem, right: MemoryTimelineItem): number {
+  const leftTime = Date.parse(left.timestamp);
+  const rightTime = Date.parse(right.timestamp);
+
+  if (!Number.isNaN(leftTime) && !Number.isNaN(rightTime) && leftTime !== rightTime) {
+    return rightTime - leftTime;
+  }
+
+  if (left.status !== right.status) {
+    return left.status === 'needs_followup' ? -1 : right.status === 'needs_followup' ? 1 : left.status.localeCompare(right.status);
+  }
+
+  return left.title.localeCompare(right.title);
+}
+
+function isTimelineItem(item: MemoryTimelineItem | null): item is MemoryTimelineItem {
+  return item !== null;
+}
+
+function buildFamilyTimelineDetail(member: FamilyMember, fact: FamilyHistoryFact): string {
+  const condition = CONDITIONS_BY_ID[fact.conditionId];
+  const degree = member.degree === 'first' ? 'First-degree' : 'Second-degree';
+  const ageLine = fact.ageAtOnset?.trim() ? ` Diagnosed around age ${fact.ageAtOnset.trim()}.` : '';
+  const reviewLine = factNeedsFollowup(fact) ? ' This detail still needs confirmation before wider reuse.' : ' This fact looks ready to carry forward.';
+  return `${degree} family history of ${condition.label.toLowerCase()}.${ageLine} Source: ${formatFactSourceLabel(fact.source)}. Confidence: ${formatFactConfidenceLabel(fact.confidence)}.${reviewLine}`
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function buildPersonalContextTimelineDetail(item: PersonalContextItem): string {
+  const detailLine = item.detail?.trim() ? `${item.detail.trim()}. ` : '';
+  const reviewLine = personalContextItemNeedsFollowup(item)
+    ? 'This item still needs confirmation before wider reuse.'
+    : 'This item looks ready to carry forward.';
+  return `${detailLine}Source: ${formatFactSourceLabel(item.source)}. Confidence: ${formatFactConfidenceLabel(item.confidence)}. ${reviewLine}`
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export function buildSummaryArtifact(profile: FamilyHistoryProfile): SummaryArtifact {
   const members = getTrackedMembers(profile);
   const firstDegreeMembers = members.filter((member) => member.degree === 'first');
   const secondDegreeMembers = members.filter((member) => member.degree === 'second');
   const trackedMemberIds = new Set(members.map((member) => member.id));
+  const membersById = new Map(members.map((member) => [member.id, member]));
   const medications = getCompletePersonalContextItems(profile.personal.medications);
   const allergies = getCompletePersonalContextItems(profile.personal.allergies);
   const chronicConditions = getCompletePersonalContextItems(profile.personal.chronicConditions);
@@ -307,6 +382,151 @@ export function buildSummaryArtifact(profile: FamilyHistoryProfile): SummaryArti
     doctorVisitNotes.push('Bring this summary to future visits as a starting point, then keep adding details over time.');
   }
 
+  const familyDiscoveries: MemoryTimelineItem[] = documentedFacts
+    .filter((fact) => fact.status === 'present')
+    .map((fact): MemoryTimelineItem | null => {
+      const member = membersById.get(fact.memberId);
+      if (!member) {
+        return null;
+      }
+
+      const condition = CONDITIONS_BY_ID[fact.conditionId];
+      return {
+        id: `family-${fact.id}`,
+        title: `${memberName(member)} · ${condition.label}`,
+        detail: buildFamilyTimelineDetail(member, fact),
+        timestamp: fact.lastUpdatedAt,
+        status: factNeedsFollowup(fact) ? 'needs_followup' : 'ready_to_share',
+        tags: [condition.cluster, member.degree === 'first' ? 'first_degree' : 'second_degree', fact.source, fact.confidence],
+      } satisfies MemoryTimelineItem;
+    })
+    .filter((item): item is MemoryTimelineItem => item !== null)
+    .sort(sortTimelineItems);
+
+  const durablePatientMemoryFacts = patientMemoryItems
+    .map(
+      (item): MemoryTimelineItem => ({
+      id: `patient-${item.id}`,
+      title: `${formatPersonalContextKindLabel(item.kind)} · ${item.label.trim()}`,
+      detail: buildPersonalContextTimelineDetail(item),
+      timestamp: item.lastUpdatedAt,
+      status: personalContextItemNeedsFollowup(item) ? 'needs_followup' : 'ready_to_share',
+      tags: [item.kind, item.source, item.confidence],
+      }),
+    )
+    .sort(sortTimelineItems);
+
+  const buildProfileContextFact = (
+    idSuffix: string,
+    title: string,
+    detail: string | null,
+    tags: string[],
+  ): MemoryTimelineItem | null => {
+    const trimmedDetail = detail?.trim();
+    if (!trimmedDetail) {
+      return null;
+    }
+
+    return {
+      id: `profile-${idSuffix}`,
+      title,
+      detail: trimmedDetail,
+      timestamp: profile.updatedAt,
+      status: 'ready_to_share',
+      tags,
+    };
+  };
+
+  const durableProfileFacts: MemoryTimelineItem[] = [
+    buildProfileContextFact(
+      'preferred-language',
+      'Preferred language',
+      profile.personal.preferredLanguage?.trim() ? `Preferred language is ${profile.personal.preferredLanguage.trim()}.` : null,
+      ['care_preference', 'preferred_language'],
+    ),
+    buildProfileContextFact(
+      'pronouns',
+      'Pronouns',
+      profile.personal.pronouns?.trim() ? `Pronouns are ${profile.personal.pronouns.trim()}.` : null,
+      ['care_preference', 'pronouns'],
+    ),
+    buildProfileContextFact(
+      'timezone',
+      'Timezone',
+      profile.personal.timezone?.trim() ? `Timezone is ${profile.personal.timezone.trim()}.` : null,
+      ['care_preference', 'timezone'],
+    ),
+    buildProfileContextFact(
+      'preferred-pharmacy',
+      'Preferred pharmacy',
+      profile.personal.preferredPharmacy?.trim() ? `Preferred pharmacy is ${profile.personal.preferredPharmacy.trim()}.` : null,
+      ['care_preference', 'preferred_pharmacy'],
+    ),
+    buildProfileContextFact(
+      'visit-goal',
+      'Visit goal',
+      profile.personal.visitGoal?.trim() ? `Visit goal is ${profile.personal.visitGoal.trim()}.` : null,
+      ['care_preference', 'visit_goal'],
+    ),
+    buildProfileContextFact(
+      'pregnancy-context',
+      'Pregnancy context',
+      profile.personal.pregnancyContext ? `Pregnancy context is ${formatPregnancyContextLabel(profile.personal.pregnancyContext).toLowerCase()}.` : null,
+      ['care_preference', 'pregnancy_context'],
+    ),
+    buildProfileContextFact(
+      'tobacco-nicotine',
+      'Tobacco / nicotine',
+      profile.personal.tobaccoNicotineStatus
+        ? `Tobacco or nicotine status is ${formatTobaccoNicotineStatusLabel(profile.personal.tobaccoNicotineStatus).toLowerCase()}.`
+        : null,
+      ['care_preference', 'tobacco_nicotine'],
+    ),
+    buildProfileContextFact(
+      'alcohol-use',
+      'Alcohol use',
+      profile.personal.alcoholUse ? `Alcohol use is ${formatAlcoholUseLabel(profile.personal.alcoholUse).toLowerCase()}.` : null,
+      ['care_preference', 'alcohol_use'],
+    ),
+    buildProfileContextFact(
+      'substance-context',
+      'Other substance context',
+      profile.personal.substanceContext?.trim() ? `Other substance context: ${profile.personal.substanceContext.trim()}.` : null,
+      ['care_preference', 'substance_context'],
+    ),
+    buildProfileContextFact(
+      'access-barriers',
+      'Care barriers',
+      profile.personal.accessBarriers?.trim() ? `Care barriers: ${profile.personal.accessBarriers.trim()}.` : null,
+      ['care_preference', 'access_barriers'],
+    ),
+    buildProfileContextFact(
+      'health-worries',
+      'Main health worry',
+      profile.personal.healthWorries?.trim() ? `Main health worry: ${profile.personal.healthWorries.trim()}.` : null,
+      ['care_preference', 'health_worries'],
+    ),
+  ].filter(isTimelineItem);
+
+  const durableFacts: MemoryTimelineItem[] = [...durablePatientMemoryFacts, ...durableProfileFacts].sort(sortTimelineItems);
+
+  const openQuestionItems = missingQuestions
+    .map(
+      (question): MemoryTimelineItem => ({
+      id: `question-${question.id}`,
+      title: question.prompt,
+      detail: question.reason,
+      timestamp: profile.updatedAt,
+      status: 'open_question',
+      tags: ['open_question', question.cluster, question.priority],
+      }),
+    )
+    .sort(sortTimelineItems);
+
+  const recentChanges: MemoryTimelineItem[] = [...familyDiscoveries, ...durablePatientMemoryFacts].sort(sortTimelineItems).slice(0, 10);
+  const readyToShareTimelineCount = [...familyDiscoveries, ...durableFacts].filter((item) => item.status === 'ready_to_share').length;
+  const needsFollowupTimelineCount = [...familyDiscoveries, ...durableFacts].filter((item) => item.status === 'needs_followup').length;
+
   const plainLanguageSummary = [
     keyPatterns[0],
     patientContextNotes[0] ?? keyPatterns[1],
@@ -335,6 +555,41 @@ export function buildSummaryArtifact(profile: FamilyHistoryProfile): SummaryArti
     doctorVisitNotes,
     incompletenessNotes,
     reviewabilityNotes,
+    memoryTimeline: {
+      lastUpdatedAt: profile.updatedAt,
+      readyToShareCount: readyToShareTimelineCount,
+      needsFollowupCount: needsFollowupTimelineCount,
+      recentChangeCount: recentChanges.length,
+      durableFactCount: durableFacts.length,
+      familyDiscoveryCount: familyDiscoveries.length,
+      openQuestionCount: openQuestionItems.length,
+      sections: [
+        {
+          id: 'recent_changes',
+          label: 'Recent changes',
+          description: 'The latest patient-memory and family-history updates that shape the current context package.',
+          items: recentChanges,
+        },
+        {
+          id: 'durable_facts',
+          label: 'Durable facts',
+          description: 'Stable patient-memory and care-context items worth carrying from visit to visit.',
+          items: durableFacts,
+        },
+        {
+          id: 'family_discoveries',
+          label: 'Family discoveries',
+          description: 'Family-history facts currently present in the graph, with review state kept explicit.',
+          items: familyDiscoveries,
+        },
+        {
+          id: 'open_questions',
+          label: 'Open questions',
+          description: 'Missing details that would make this context more reusable in future care.',
+          items: openQuestionItems,
+        },
+      ],
+    },
   };
 }
 

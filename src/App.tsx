@@ -48,7 +48,7 @@ import { ClusterKnowledgeWorkbench, ClusterSignalBars, ConditionClusterGraph } f
 import { CLUSTERS, CLUSTER_ORDER, CONDITIONS, CONDITIONS_BY_ID, type ClusterId, type ConditionId } from './lib/taxonomy';
 
 const STEP_ORDER: StepId[] = ['intro', 'about-you', 'family-members', 'conditions', 'missing-details', 'summary'];
-const SUMMARY_TABS = ['overview', 'handoff', 'graph', 'clusters', 'questions'] as const;
+const SUMMARY_TABS = ['overview', 'timeline', 'handoff', 'graph', 'clusters', 'questions'] as const;
 const GRAPH_CLUSTER_FILTERS = ['all', ...CLUSTER_ORDER] as const;
 const FEATURED_DEMO_SAMPLE_ID = 'medcanon-demo';
 
@@ -58,6 +58,7 @@ type PersonalCollectionKey = 'medications' | 'allergies' | 'chronicConditions';
 
 const SUMMARY_TAB_LABELS: Record<SummaryTab, string> = {
   overview: 'Overview',
+  timeline: 'Memory Timeline',
   handoff: 'MedCanon Handoff',
   graph: 'Family Graph',
   clusters: 'Condition Clusters',
@@ -541,6 +542,7 @@ function App() {
                 <ul className="clean-list">
                   <li>Guided family member onboarding</li>
                   <li>Lightweight patient memory capture</li>
+                  <li>A patient memory timeline for longitudinal context</li>
                   <li>Bulk condition entry by cluster</li>
                   <li>A graph-style family and cluster view</li>
                   <li>A MedCanon handoff view for clinician context</li>
@@ -966,6 +968,7 @@ function App() {
             </div>
 
             {summaryTab === 'overview' ? <OverviewTab profile={profile} artifact={artifact} doctorNote={doctorNote} /> : null}
+            {summaryTab === 'timeline' ? <MemoryTimelineTab profile={profile} artifact={artifact} /> : null}
             {summaryTab === 'handoff' ? (
               <MedCanonHandoffTab handoff={medCanonHandoff} visitMode={handoffVisitMode} setVisitMode={setHandoffVisitMode} />
             ) : null}
@@ -1643,6 +1646,190 @@ function OverviewTab({ profile, artifact, doctorNote }: { profile: FamilyHistory
   );
 }
 
+function MemoryTimelineTab({ profile, artifact }: { profile: FamilyHistoryProfile; artifact: SummaryArtifact }) {
+  const recentChanges = artifact.memoryTimeline.sections.find((section) => section.id === 'recent_changes')!;
+  const durableFacts = artifact.memoryTimeline.sections.find((section) => section.id === 'durable_facts')!;
+  const familyDiscoveries = artifact.memoryTimeline.sections.find((section) => section.id === 'family_discoveries')!;
+  const openQuestions = artifact.memoryTimeline.sections.find((section) => section.id === 'open_questions')!;
+
+  return (
+    <div className="summary-grid timeline-grid">
+      <div className="summary-main-column">
+        <article className="data-card accent-card timeline-hero-card">
+          <p className="eyebrow">Patient memory timeline</p>
+          <h3>Track what changed, what stays durable, and what still needs confirmation</h3>
+          <p className="muted-copy">
+            This view turns the profile into a longitudinal context record that can keep getting better between visits instead of restarting
+            from scratch each time.
+          </p>
+          <div className="snapshot-grid">
+            <div className="snapshot-card">
+              <span>Recent changes</span>
+              <strong>{artifact.memoryTimeline.recentChangeCount}</strong>
+            </div>
+            <div className="snapshot-card">
+              <span>Durable facts</span>
+              <strong>{artifact.memoryTimeline.durableFactCount}</strong>
+            </div>
+            <div className="snapshot-card">
+              <span>Family discoveries</span>
+              <strong>{artifact.memoryTimeline.familyDiscoveryCount}</strong>
+            </div>
+            <div className="snapshot-card">
+              <span>Open questions</span>
+              <strong>{artifact.memoryTimeline.openQuestionCount}</strong>
+            </div>
+            <div className="snapshot-card">
+              <span>Ready to share</span>
+              <strong>{artifact.memoryTimeline.readyToShareCount}</strong>
+            </div>
+            <div className="snapshot-card">
+              <span>Need follow-up</span>
+              <strong>{artifact.memoryTimeline.needsFollowupCount}</strong>
+            </div>
+          </div>
+          <p className="muted-copy">Latest profile update: {formatTimestamp(artifact.memoryTimeline.lastUpdatedAt)}.</p>
+        </article>
+
+        <article className="data-card">
+          <p className="eyebrow">{recentChanges.label}</p>
+          <h3>{recentChanges.description}</h3>
+          <TimelineSectionList
+            items={recentChanges.items}
+            emptyMessage="No recent fact-level changes yet. Add or edit family history, medications, allergies, or chronic conditions to start the timeline."
+          />
+        </article>
+
+        <div className="timeline-section-grid">
+          <article className="data-card">
+            <p className="eyebrow">{durableFacts.label}</p>
+            <h3>{durableFacts.description}</h3>
+            <TimelineSectionList
+              items={durableFacts.items}
+              emptyMessage="No durable facts are stored yet. Add patient memory items and profile context to build a reusable memory layer."
+            />
+          </article>
+
+          <article className="data-card">
+            <p className="eyebrow">{familyDiscoveries.label}</p>
+            <h3>{familyDiscoveries.description}</h3>
+            <TimelineSectionList
+              items={familyDiscoveries.items}
+              emptyMessage="No family discoveries are recorded yet. Add relatives and present conditions to start building family context."
+            />
+          </article>
+        </div>
+
+        <article className="data-card">
+          <p className="eyebrow">{openQuestions.label}</p>
+          <h3>{openQuestions.description}</h3>
+          <TimelineSectionList
+            items={openQuestions.items}
+            emptyMessage="No open questions right now. The current profile has enough detail to carry forward without obvious follow-up prompts."
+          />
+        </article>
+      </div>
+
+      <aside className="summary-side-column">
+        <article className="data-card">
+          <p className="eyebrow">How to use it</p>
+          <ul className="clean-list compact-list">
+            <li>Use `Recent changes` to show what the patient added or updated most recently.</li>
+            <li>Use `Durable facts` as the compact memory layer that should keep following the patient into future visits.</li>
+            <li>Use `Family discoveries` to separate patient facts from family-history findings.</li>
+            <li>Use `Open questions` to show where MedCanon or a clinician should ask one more question instead of guessing.</li>
+          </ul>
+        </article>
+
+        <article className="data-card">
+          <p className="eyebrow">Context freshness</p>
+          <dl className="profile-facts">
+            <div>
+              <dt>Latest draft update</dt>
+              <dd>{formatTimestamp(profile.updatedAt)}</dd>
+            </div>
+            <div>
+              <dt>Tracked relatives</dt>
+              <dd>{getTrackedMembers(profile).length}</dd>
+            </div>
+            <div>
+              <dt>Patient memory items</dt>
+              <dd>{artifact.patientContextCounts.total}</dd>
+            </div>
+            <div>
+              <dt>Visit goal</dt>
+              <dd>{profile.personal.visitGoal || 'Not set'}</dd>
+            </div>
+          </dl>
+        </article>
+
+        <article className="data-card">
+          <p className="eyebrow">Profile snapshot</p>
+          <dl className="profile-facts">
+            <div>
+              <dt>Profile name</dt>
+              <dd>{profile.personal.nameOrLabel || 'Not set'}</dd>
+            </div>
+            <div>
+              <dt>Age range</dt>
+              <dd>{profile.personal.ageRange || 'Not set'}</dd>
+            </div>
+            <div>
+              <dt>Reason for starting</dt>
+              <dd>{profile.personal.reasonForStarting || 'Not set'}</dd>
+            </div>
+            <div>
+              <dt>Main worry</dt>
+              <dd>{profile.personal.healthWorries || 'Not set'}</dd>
+            </div>
+          </dl>
+        </article>
+      </aside>
+    </div>
+  );
+}
+
+function TimelineSectionList({
+  items,
+  emptyMessage,
+}: {
+  items: SummaryArtifact['memoryTimeline']['sections'][number]['items'];
+  emptyMessage: string;
+}) {
+  if (items.length === 0) {
+    return <p className="muted-copy">{emptyMessage}</p>;
+  }
+
+  return (
+    <div className="timeline-list">
+      {items.map((item) => (
+        <div key={item.id} className="timeline-item">
+          <div className="timeline-rail">
+            <span className={`timeline-dot ${item.status}`} />
+          </div>
+          <article className="handoff-signal-card timeline-card">
+            <div className="question-card-top">
+              <span className="cluster-tag">{formatTimestamp(item.timestamp)}</span>
+              <span className={`cluster-tag ${item.status === 'needs_followup' ? 'warning-chip' : item.status === 'open_question' ? 'muted-chip' : ''}`}>
+                {formatTimelineStatus(item.status)}
+              </span>
+            </div>
+            <h4>{item.title}</h4>
+            <p>{item.detail}</p>
+            <div className="chip-row">
+              {item.tags.slice(0, 4).map((tag) => (
+                <span key={`${item.id}-${tag}`} className="chip">
+                  {tag.replace(/_/g, ' ')}
+                </span>
+              ))}
+            </div>
+          </article>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function MedCanonHandoffTab({
   handoff,
   visitMode,
@@ -2262,6 +2449,16 @@ function formatTimestamp(isoTimestamp: string): string {
     hour: 'numeric',
     minute: '2-digit',
   }).format(date);
+}
+
+function formatTimelineStatus(status: SummaryArtifact['memoryTimeline']['sections'][number]['items'][number]['status']): string {
+  if (status === 'ready_to_share') {
+    return 'ready to share';
+  }
+  if (status === 'needs_followup') {
+    return 'needs follow-up';
+  }
+  return 'open question';
 }
 
 export default App;
