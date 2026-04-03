@@ -1,15 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import logo from '../assets/first-degree-logo.svg';
 import {
+  ALCOHOL_USE_OPTIONS,
   AGE_RANGES,
   FACT_CONFIDENCE_OPTIONS,
   FACT_REVIEW_STATUS_OPTIONS,
   FACT_SOURCE_OPTIONS,
+  PREGNANCY_CONTEXT_OPTIONS,
+  TOBACCO_NICOTINE_OPTIONS,
   countAnsweredFactsForMember,
   countPresentFactsForMember,
   createBlankProfile,
   createFactRecord,
   createPersonalContextItem,
+  formatAlcoholUseLabel,
+  formatPregnancyContextLabel,
+  formatTobaccoNicotineStatusLabel,
   createSibling,
   getCompletePersonalContextItems,
   getFact,
@@ -650,10 +656,74 @@ function App() {
                   <li>Current medications and how you take them</li>
                   <li>Allergies and the reaction if you know it</li>
                   <li>Chronic conditions you want a clinician to keep in view</li>
-                  <li>Preferences like language, pharmacy, timezone, and visit goals</li>
+                  <li>Pregnancy context, substance summary, barriers, and the worries you want surfaced</li>
                 </ul>
               </article>
             </div>
+
+            <article className="data-card">
+              <p className="eyebrow">Higher-value personal context</p>
+              <h3>Add the context that often changes telehealth care, triage, and follow-up</h3>
+              <div className="form-grid three-up">
+                <label className="field">
+                  <span>Pregnancy relevance</span>
+                  <select value={profile.personal.pregnancyContext} onChange={(event) => handlePersonalChange('pregnancyContext', event.target.value)}>
+                    {PREGNANCY_CONTEXT_OPTIONS.map((option) => (
+                      <option key={option.value || 'blank'} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Tobacco or nicotine</span>
+                  <select
+                    value={profile.personal.tobaccoNicotineStatus}
+                    onChange={(event) => handlePersonalChange('tobaccoNicotineStatus', event.target.value)}
+                  >
+                    {TOBACCO_NICOTINE_OPTIONS.map((option) => (
+                      <option key={option.value || 'blank'} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Alcohol use</span>
+                  <select value={profile.personal.alcoholUse} onChange={(event) => handlePersonalChange('alcoholUse', event.target.value)}>
+                    {ALCOHOL_USE_OPTIONS.map((option) => (
+                      <option key={option.value || 'blank'} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field wide">
+                  <span>Other substance context</span>
+                  <input
+                    value={profile.personal.substanceContext}
+                    onChange={(event) => handlePersonalChange('substanceContext', event.target.value)}
+                    placeholder="Ex: Occasional cannabis edible, in recovery, none"
+                  />
+                </label>
+                <label className="field wide">
+                  <span>Care barriers</span>
+                  <input
+                    value={profile.personal.accessBarriers}
+                    onChange={(event) => handlePersonalChange('accessBarriers', event.target.value)}
+                    placeholder="Ex: Cost-sensitive prescriptions, transportation issues, childcare"
+                  />
+                </label>
+                <label className="field wide">
+                  <span>Main health worry to carry forward</span>
+                  <input
+                    value={profile.personal.healthWorries}
+                    onChange={(event) => handlePersonalChange('healthWorries', event.target.value)}
+                    placeholder="Ex: Worried this chest pressure could be heart-related because of family history"
+                  />
+                </label>
+              </div>
+            </article>
 
             <div className="patient-memory-editor-grid">
               <PersonalContextListEditor
@@ -1462,6 +1532,33 @@ function OverviewTab({ profile, artifact, doctorNote }: { profile: FamilyHistory
                   {[profile.personal.preferredLanguage, profile.personal.pronouns].filter(Boolean).join(' · ') || 'Not set'}
                 </dd>
               </div>
+              <div>
+                <dt>Pregnancy context</dt>
+                <dd>{profile.personal.pregnancyContext ? formatPregnancyContextLabel(profile.personal.pregnancyContext) : 'Not set'}</dd>
+              </div>
+              <div>
+                <dt>Tobacco / alcohol</dt>
+                <dd>
+                  {[
+                    profile.personal.tobaccoNicotineStatus ? formatTobaccoNicotineStatusLabel(profile.personal.tobaccoNicotineStatus) : '',
+                    profile.personal.alcoholUse ? formatAlcoholUseLabel(profile.personal.alcoholUse) : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' · ') || 'Not set'}
+                </dd>
+              </div>
+              <div>
+                <dt>Other substance context</dt>
+                <dd>{profile.personal.substanceContext || 'Not set'}</dd>
+              </div>
+              <div>
+                <dt>Care barriers</dt>
+                <dd>{profile.personal.accessBarriers || 'Not set'}</dd>
+              </div>
+              <div>
+                <dt>Main worry</dt>
+                <dd>{profile.personal.healthWorries || 'Not set'}</dd>
+              </div>
             </dl>
             {patientMemoryChips.length > 0 ? (
               <div className="chip-row compact-note-list">
@@ -1473,7 +1570,7 @@ function OverviewTab({ profile, artifact, doctorNote }: { profile: FamilyHistory
               </div>
             ) : null}
             <ul className="clean-list compact-list compact-note-list">
-              {artifact.patientContextNotes.slice(0, 4).map((note) => (
+              {artifact.patientContextNotes.slice(0, 6).map((note) => (
                 <li key={note}>{note}</li>
               ))}
             </ul>
@@ -1516,6 +1613,14 @@ function OverviewTab({ profile, artifact, doctorNote }: { profile: FamilyHistory
               <div>
                 <dt>Reason for starting</dt>
                 <dd>{profile.personal.reasonForStarting || 'Not set'}</dd>
+              </div>
+              <div>
+                <dt>Care barriers</dt>
+                <dd>{profile.personal.accessBarriers || 'Not set'}</dd>
+              </div>
+              <div>
+                <dt>Main worry</dt>
+                <dd>{profile.personal.healthWorries || 'Not set'}</dd>
               </div>
             </dl>
           </article>

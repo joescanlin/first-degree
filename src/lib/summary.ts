@@ -1,6 +1,9 @@
 import { CLUSTERS, CLUSTER_ORDER, CONDITIONS_BY_ID, type ClusterId, type ConditionId } from './taxonomy';
 import {
   factNeedsFollowup,
+  formatAlcoholUseLabel,
+  formatPregnancyContextLabel,
+  formatTobaccoNicotineStatusLabel,
   getCompletePersonalContextItems,
   getFact,
   getTrackedMembers,
@@ -209,6 +212,24 @@ export function buildSummaryArtifact(profile: FamilyHistoryProfile): SummaryArti
   if (profile.personal.visitGoal?.trim()) {
     patientContextNotes.push(`Visit goal: ${profile.personal.visitGoal.trim()}`);
   }
+  if (profile.personal.pregnancyContext) {
+    patientContextNotes.push(`Pregnancy-relevant context: ${formatPregnancyContextLabel(profile.personal.pregnancyContext)}.`);
+  }
+  if (profile.personal.tobaccoNicotineStatus) {
+    patientContextNotes.push(`Tobacco or nicotine status: ${formatTobaccoNicotineStatusLabel(profile.personal.tobaccoNicotineStatus)}.`);
+  }
+  if (profile.personal.alcoholUse) {
+    patientContextNotes.push(`Alcohol use summary: ${formatAlcoholUseLabel(profile.personal.alcoholUse)}.`);
+  }
+  if (profile.personal.substanceContext?.trim()) {
+    patientContextNotes.push(`Other substance context: ${profile.personal.substanceContext.trim()}`);
+  }
+  if (profile.personal.accessBarriers?.trim()) {
+    patientContextNotes.push(`Care barriers: ${profile.personal.accessBarriers.trim()}`);
+  }
+  if (profile.personal.healthWorries?.trim()) {
+    patientContextNotes.push(`Main health worry: ${profile.personal.healthWorries.trim()}`);
+  }
   if (profile.personal.preferredLanguage?.trim() || profile.personal.pronouns?.trim() || profile.personal.preferredPharmacy?.trim()) {
     const preferenceParts = [
       profile.personal.preferredLanguage?.trim() ? `language ${profile.personal.preferredLanguage.trim()}` : null,
@@ -257,6 +278,24 @@ export function buildSummaryArtifact(profile: FamilyHistoryProfile): SummaryArti
   }
   if (profile.personal.visitGoal?.trim()) {
     doctorVisitNotes.push(`Lead with the patient goal: ${profile.personal.visitGoal.trim()}`);
+  }
+  if (profile.personal.pregnancyContext) {
+    doctorVisitNotes.push(`Pregnancy-relevant context is ${formatPregnancyContextLabel(profile.personal.pregnancyContext).toLowerCase()}.`);
+  }
+  if (profile.personal.tobaccoNicotineStatus) {
+    doctorVisitNotes.push(`Tobacco or nicotine status is ${formatTobaccoNicotineStatusLabel(profile.personal.tobaccoNicotineStatus).toLowerCase()}.`);
+  }
+  if (profile.personal.alcoholUse) {
+    doctorVisitNotes.push(`Alcohol use is recorded as ${formatAlcoholUseLabel(profile.personal.alcoholUse).toLowerCase()}.`);
+  }
+  if (profile.personal.substanceContext?.trim()) {
+    doctorVisitNotes.push(`Other substance context to keep in view: ${profile.personal.substanceContext.trim()}`);
+  }
+  if (profile.personal.accessBarriers?.trim()) {
+    doctorVisitNotes.push(`Care barriers to mention: ${profile.personal.accessBarriers.trim()}`);
+  }
+  if (profile.personal.healthWorries?.trim()) {
+    doctorVisitNotes.push(`Main worry to keep visible: ${profile.personal.healthWorries.trim()}`);
   }
   if (profile.personal.preferredPharmacy?.trim()) {
     doctorVisitNotes.push(`Preferred pharmacy is ${profile.personal.preferredPharmacy.trim()}.`);

@@ -1,8 +1,11 @@
 import {
   factNeedsFollowup,
   formatFactConfidenceLabel,
+  formatAlcoholUseLabel,
   formatPersonalContextKindLabel,
+  formatPregnancyContextLabel,
   formatFactSourceLabel,
+  formatTobaccoNicotineStatusLabel,
   getCompletePersonalContextItems,
   getTrackedMembers,
   personalContextItemNeedsFollowup,
@@ -433,6 +436,41 @@ function scorePatientContextForVisit(
     if ((normalized.includes('preferred language') || normalized.includes('pronouns')) && visitMode === 'general_intake') {
       score += 6;
     }
+    if (normalized.includes('pregnancy')) {
+      if (visitMode === 'acute_symptom' || visitMode === 'medication_follow_up' || visitMode === 'chronic_follow_up') {
+        score += 12;
+      } else if (visitMode === 'general_intake') {
+        score += 7;
+      }
+    }
+    if (normalized.includes('tobacco') || normalized.includes('nicotine')) {
+      if (visitMode === 'preventive' || visitMode === 'chronic_follow_up') {
+        score += 9;
+      } else if (visitMode === 'general_intake') {
+        score += 4;
+      }
+    }
+    if (normalized.includes('alcohol')) {
+      if (visitMode === 'preventive' || visitMode === 'chronic_follow_up') {
+        score += 8;
+      } else if (visitMode === 'general_intake') {
+        score += 4;
+      }
+    }
+    if (normalized.includes('substance')) {
+      if (visitMode === 'acute_symptom' || visitMode === 'chronic_follow_up') {
+        score += 9;
+      } else if (visitMode === 'general_intake') {
+        score += 5;
+      }
+    }
+    if (normalized.includes('care barriers') || normalized.includes('main health worry')) {
+      if (visitMode === 'general_intake' || visitMode === 'acute_symptom') {
+        score += 10;
+      } else if (visitMode === 'preventive') {
+        score += 4;
+      }
+    }
   }
 
   const reason =
@@ -444,7 +482,15 @@ function scorePatientContextForVisit(
         ? 'Allergy context should stay visible because it can change care and prescribing decisions quickly.'
       : domain === 'condition'
         ? 'Chronic condition context should remain visible for this visit type.'
-      : 'Care preferences change how this visit is framed and carried through MedCanon.';
+      : normalized.includes('pregnancy')
+        ? 'Pregnancy context can change triage, medication safety, and follow-up planning.'
+        : normalized.includes('tobacco') || normalized.includes('nicotine') || normalized.includes('alcohol')
+          ? 'Substance-use context can materially change preventive counseling and chronic-care framing.'
+          : normalized.includes('substance')
+            ? 'Other substance context belongs in the handoff when it could change triage or follow-up.'
+            : normalized.includes('care barriers') || normalized.includes('main health worry')
+              ? 'This patient-priority context helps clinicians frame the visit and choose realistic follow-up.'
+              : 'Care preferences change how this visit is framed and carried through MedCanon.';
 
   return { score, reason };
 }
@@ -652,87 +698,83 @@ export function buildMedCanonHandoffPackage(
     .map((item) => mapPatientMemoryItem(item))
     .sort((left, right) => right.relevance_score - left.relevance_score);
 
+  const buildCarePreferenceFact = (
+    idSuffix: string,
+    label: string,
+    value: string | null,
+    tag: string,
+  ): HandoffDurableFact | null => {
+    const trimmedValue = value?.trim();
+    if (!trimmedValue) {
+      return null;
+    }
+
+    const relevance = scorePatientContextForVisit('care_preference', label, visitMode);
+    return {
+      id: `${sourcePrefix}-${idSuffix}`,
+      domain: 'care_preference',
+      label,
+      value: trimmedValue,
+      source: 'patient_memory',
+      confidence: 'certain',
+      review_status: 'ready_to_share',
+      review_required: false,
+      recorded_at: recordedAt,
+      tags: ['patient_context', 'care_preference', tag],
+      relevance_score: relevance.score,
+      relevance_reason: relevance.reason,
+    };
+  };
+
   const carePreferenceFacts: HandoffDurableFact[] = [
-    profile.personal.preferredLanguage?.trim()
-      ? {
-          id: `${sourcePrefix}-preferred-language`,
-          domain: 'care_preference',
-          label: 'Preferred language',
-          value: `Preferred language: ${profile.personal.preferredLanguage.trim()}.`,
-          source: 'patient_memory',
-          confidence: 'certain',
-          review_status: 'ready_to_share',
-          review_required: false,
-          recorded_at: recordedAt,
-          tags: ['patient_context', 'care_preference', 'preferred_language'],
-          relevance_score: scorePatientContextForVisit('care_preference', 'Preferred language', visitMode).score,
-          relevance_reason: scorePatientContextForVisit('care_preference', 'Preferred language', visitMode).reason,
-        }
-      : null,
-    profile.personal.pronouns?.trim()
-      ? {
-          id: `${sourcePrefix}-pronouns`,
-          domain: 'care_preference',
-          label: 'Pronouns',
-          value: `Pronouns: ${profile.personal.pronouns.trim()}.`,
-          source: 'patient_memory',
-          confidence: 'certain',
-          review_status: 'ready_to_share',
-          review_required: false,
-          recorded_at: recordedAt,
-          tags: ['patient_context', 'care_preference', 'pronouns'],
-          relevance_score: scorePatientContextForVisit('care_preference', 'Pronouns', visitMode).score,
-          relevance_reason: scorePatientContextForVisit('care_preference', 'Pronouns', visitMode).reason,
-        }
-      : null,
-    profile.personal.timezone?.trim()
-      ? {
-          id: `${sourcePrefix}-timezone`,
-          domain: 'care_preference',
-          label: 'Timezone',
-          value: `Timezone: ${profile.personal.timezone.trim()}.`,
-          source: 'patient_memory',
-          confidence: 'certain',
-          review_status: 'ready_to_share',
-          review_required: false,
-          recorded_at: recordedAt,
-          tags: ['patient_context', 'care_preference', 'timezone'],
-          relevance_score: scorePatientContextForVisit('care_preference', 'Timezone', visitMode).score,
-          relevance_reason: scorePatientContextForVisit('care_preference', 'Timezone', visitMode).reason,
-        }
-      : null,
-    profile.personal.preferredPharmacy?.trim()
-      ? {
-          id: `${sourcePrefix}-preferred-pharmacy`,
-          domain: 'care_preference',
-          label: 'Preferred pharmacy',
-          value: `Preferred pharmacy: ${profile.personal.preferredPharmacy.trim()}.`,
-          source: 'patient_memory',
-          confidence: 'certain',
-          review_status: 'ready_to_share',
-          review_required: false,
-          recorded_at: recordedAt,
-          tags: ['patient_context', 'care_preference', 'preferred_pharmacy'],
-          relevance_score: scorePatientContextForVisit('care_preference', 'Preferred pharmacy', visitMode).score,
-          relevance_reason: scorePatientContextForVisit('care_preference', 'Preferred pharmacy', visitMode).reason,
-        }
-      : null,
-    profile.personal.visitGoal?.trim()
-      ? {
-          id: `${sourcePrefix}-visit-goal`,
-          domain: 'care_preference',
-          label: 'Visit goal',
-          value: `Visit goal: ${profile.personal.visitGoal.trim()}.`,
-          source: 'patient_memory',
-          confidence: 'certain',
-          review_status: 'ready_to_share',
-          review_required: false,
-          recorded_at: recordedAt,
-          tags: ['patient_context', 'care_preference', 'visit_goal'],
-          relevance_score: scorePatientContextForVisit('care_preference', 'Visit goal', visitMode).score,
-          relevance_reason: scorePatientContextForVisit('care_preference', 'Visit goal', visitMode).reason,
-        }
-      : null,
+    buildCarePreferenceFact('preferred-language', 'Preferred language', profile.personal.preferredLanguage?.trim() ? `Preferred language: ${profile.personal.preferredLanguage.trim()}.` : null, 'preferred_language'),
+    buildCarePreferenceFact('pronouns', 'Pronouns', profile.personal.pronouns?.trim() ? `Pronouns: ${profile.personal.pronouns.trim()}.` : null, 'pronouns'),
+    buildCarePreferenceFact('timezone', 'Timezone', profile.personal.timezone?.trim() ? `Timezone: ${profile.personal.timezone.trim()}.` : null, 'timezone'),
+    buildCarePreferenceFact(
+      'preferred-pharmacy',
+      'Preferred pharmacy',
+      profile.personal.preferredPharmacy?.trim() ? `Preferred pharmacy: ${profile.personal.preferredPharmacy.trim()}.` : null,
+      'preferred_pharmacy',
+    ),
+    buildCarePreferenceFact('visit-goal', 'Visit goal', profile.personal.visitGoal?.trim() ? `Visit goal: ${profile.personal.visitGoal.trim()}.` : null, 'visit_goal'),
+    buildCarePreferenceFact(
+      'pregnancy-context',
+      'Pregnancy context',
+      profile.personal.pregnancyContext ? `Pregnancy context: ${formatPregnancyContextLabel(profile.personal.pregnancyContext)}.` : null,
+      'pregnancy_context',
+    ),
+    buildCarePreferenceFact(
+      'tobacco-nicotine',
+      'Tobacco / nicotine',
+      profile.personal.tobaccoNicotineStatus
+        ? `Tobacco or nicotine status: ${formatTobaccoNicotineStatusLabel(profile.personal.tobaccoNicotineStatus)}.`
+        : null,
+      'tobacco_nicotine',
+    ),
+    buildCarePreferenceFact(
+      'alcohol-use',
+      'Alcohol use',
+      profile.personal.alcoholUse ? `Alcohol use: ${formatAlcoholUseLabel(profile.personal.alcoholUse)}.` : null,
+      'alcohol_use',
+    ),
+    buildCarePreferenceFact(
+      'substance-context',
+      'Other substance context',
+      profile.personal.substanceContext?.trim() ? `Other substance context: ${profile.personal.substanceContext.trim()}.` : null,
+      'substance_context',
+    ),
+    buildCarePreferenceFact(
+      'care-barriers',
+      'Care barriers',
+      profile.personal.accessBarriers?.trim() ? `Care barriers: ${profile.personal.accessBarriers.trim()}.` : null,
+      'access_barriers',
+    ),
+    buildCarePreferenceFact(
+      'main-health-worry',
+      'Main health worry',
+      profile.personal.healthWorries?.trim() ? `Main health worry: ${profile.personal.healthWorries.trim()}.` : null,
+      'health_worries',
+    ),
   ].filter(Boolean) as HandoffDurableFact[];
 
   const durableFacts: HandoffDurableFact[] = [

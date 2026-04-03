@@ -19,6 +19,16 @@ export type FactSource = 'patient_memory' | 'family_report' | 'medical_record' |
 export type FactConfidence = 'certain' | 'likely' | 'uncertain';
 export type FactReviewStatus = 'ready_to_share' | 'needs_followup';
 export type PersonalContextKind = 'medication' | 'allergy' | 'condition';
+export type PregnancyContext =
+  | ''
+  | 'could_be_pregnant'
+  | 'trying_to_conceive'
+  | 'pregnant'
+  | 'postpartum'
+  | 'no_current_pregnancy_context'
+  | 'not_applicable';
+export type TobaccoNicotineStatus = '' | 'never' | 'former' | 'current_some_days' | 'current_daily';
+export type AlcoholUse = '' | 'none' | 'occasional' | 'weekly' | 'heavy_or_concerned';
 
 export interface FamilyMember {
   id: string;
@@ -69,6 +79,12 @@ export interface PersonalProfile {
   timezone: string;
   preferredPharmacy: string;
   visitGoal: string;
+  pregnancyContext: PregnancyContext;
+  tobaccoNicotineStatus: TobaccoNicotineStatus;
+  alcoholUse: AlcoholUse;
+  substanceContext: string;
+  accessBarriers: string;
+  healthWorries: string;
   medications: PersonalContextItem[];
   allergies: PersonalContextItem[];
   chronicConditions: PersonalContextItem[];
@@ -92,6 +108,19 @@ const personalSchema = z.object({
   timezone: z.string().optional(),
   preferredPharmacy: z.string().optional(),
   visitGoal: z.string().optional(),
+  pregnancyContext: z.enum([
+    'could_be_pregnant',
+    'trying_to_conceive',
+    'pregnant',
+    'postpartum',
+    'no_current_pregnancy_context',
+    'not_applicable',
+  ]).optional(),
+  tobaccoNicotineStatus: z.enum(['never', 'former', 'current_some_days', 'current_daily']).optional(),
+  alcoholUse: z.enum(['none', 'occasional', 'weekly', 'heavy_or_concerned']).optional(),
+  substanceContext: z.string().optional(),
+  accessBarriers: z.string().optional(),
+  healthWorries: z.string().optional(),
   medications: z.array(
     z.object({
       id: z.string(),
@@ -257,6 +286,29 @@ export const FACT_REVIEW_STATUS_OPTIONS: Array<{ value: FactReviewStatus; label:
   { value: 'ready_to_share', label: 'Ready to share' },
   { value: 'needs_followup', label: 'Needs follow-up' },
 ];
+export const PREGNANCY_CONTEXT_OPTIONS: Array<{ value: PregnancyContext; label: string }> = [
+  { value: '', label: 'Skip for now' },
+  { value: 'not_applicable', label: 'Not applicable / prefer not to say' },
+  { value: 'no_current_pregnancy_context', label: 'No current pregnancy concern' },
+  { value: 'could_be_pregnant', label: 'Could be pregnant' },
+  { value: 'trying_to_conceive', label: 'Trying to conceive' },
+  { value: 'pregnant', label: 'Pregnant' },
+  { value: 'postpartum', label: 'Postpartum' },
+];
+export const TOBACCO_NICOTINE_OPTIONS: Array<{ value: TobaccoNicotineStatus; label: string }> = [
+  { value: '', label: 'Skip for now' },
+  { value: 'never', label: 'Never' },
+  { value: 'former', label: 'Former' },
+  { value: 'current_some_days', label: 'Current some days' },
+  { value: 'current_daily', label: 'Current daily' },
+];
+export const ALCOHOL_USE_OPTIONS: Array<{ value: AlcoholUse; label: string }> = [
+  { value: '', label: 'Skip for now' },
+  { value: 'none', label: 'None' },
+  { value: 'occasional', label: 'Occasional' },
+  { value: 'weekly', label: 'Weekly' },
+  { value: 'heavy_or_concerned', label: 'Heavy use / concerned' },
+];
 export const PERSONAL_CONTEXT_KIND_LABELS: Record<PersonalContextKind, string> = {
   medication: 'Medication',
   allergy: 'Allergy',
@@ -325,6 +377,12 @@ function normalizePersonal(value: z.infer<typeof personalSchema>): PersonalProfi
     timezone: value.timezone ?? defaultTimezone(),
     preferredPharmacy: value.preferredPharmacy ?? '',
     visitGoal: value.visitGoal ?? '',
+    pregnancyContext: value.pregnancyContext ?? '',
+    tobaccoNicotineStatus: value.tobaccoNicotineStatus ?? '',
+    alcoholUse: value.alcoholUse ?? '',
+    substanceContext: value.substanceContext ?? '',
+    accessBarriers: value.accessBarriers ?? '',
+    healthWorries: value.healthWorries ?? '',
     medications: (value.medications ?? []).map((item) => normalizePersonalContextItem({ ...item, kind: 'medication' })),
     allergies: (value.allergies ?? []).map((item) => normalizePersonalContextItem({ ...item, kind: 'allergy' })),
     chronicConditions: (value.chronicConditions ?? []).map((item) => normalizePersonalContextItem({ ...item, kind: 'condition' })),
@@ -348,6 +406,12 @@ export function createBlankProfile(): FamilyHistoryProfile {
       timezone: defaultTimezone(),
       preferredPharmacy: '',
       visitGoal: '',
+      pregnancyContext: '',
+      tobaccoNicotineStatus: '',
+      alcoholUse: '',
+      substanceContext: '',
+      accessBarriers: '',
+      healthWorries: '',
       medications: [],
       allergies: [],
       chronicConditions: [],
@@ -465,6 +529,18 @@ export function formatFactReviewStatusLabel(reviewStatus: FactReviewStatus): str
 
 export function formatPersonalContextKindLabel(kind: PersonalContextKind): string {
   return PERSONAL_CONTEXT_KIND_LABELS[kind];
+}
+
+export function formatPregnancyContextLabel(value: PregnancyContext): string {
+  return PREGNANCY_CONTEXT_OPTIONS.find((option) => option.value === value)?.label ?? value;
+}
+
+export function formatTobaccoNicotineStatusLabel(value: TobaccoNicotineStatus): string {
+  return TOBACCO_NICOTINE_OPTIONS.find((option) => option.value === value)?.label ?? value;
+}
+
+export function formatAlcoholUseLabel(value: AlcoholUse): string {
+  return ALCOHOL_USE_OPTIONS.find((option) => option.value === value)?.label ?? value;
 }
 
 export function getCompletePersonalContextItems(items: PersonalContextItem[]): PersonalContextItem[] {
