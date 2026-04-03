@@ -2,16 +2,25 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import logo from '../assets/first-degree-logo.svg';
 import {
   AGE_RANGES,
+  FACT_CONFIDENCE_OPTIONS,
+  FACT_REVIEW_STATUS_OPTIONS,
+  FACT_SOURCE_OPTIONS,
   countAnsweredFactsForMember,
   countPresentFactsForMember,
   createBlankProfile,
+  createFactRecord,
   createSibling,
   getFact,
   getTrackedMembers,
   parseProfile,
+  touchFact,
   touchProfile,
+  type FamilyHistoryFact,
   type FamilyHistoryProfile,
   type FamilyMember,
+  type FactConfidence,
+  type FactReviewStatus,
+  type FactSource,
   type FactStatus,
   type StepId,
 } from './lib/profile';
@@ -37,6 +46,26 @@ const SUMMARY_TAB_LABELS: Record<SummaryTab, string> = {
   clusters: 'Condition Clusters',
   questions: 'Questions',
 };
+
+function updateFactForStatus(fact: FamilyHistoryFact, status: FactStatus): FamilyHistoryFact | null {
+  if (status === 'unanswered') {
+    return null;
+  }
+
+  const defaults = createFactRecord(fact.memberId, fact.conditionId, status);
+  return touchFact(fact, {
+    status,
+    ageAtOnset: status === 'present' ? fact.ageAtOnset : '',
+    source: status === 'unknown' ? defaults.source : fact.source === 'unknown' ? defaults.source : fact.source,
+    confidence: status === 'unknown' ? defaults.confidence : fact.confidence === 'uncertain' ? defaults.confidence : fact.confidence,
+    reviewStatus:
+      status === 'unknown'
+        ? defaults.reviewStatus
+        : fact.reviewStatus === 'needs_followup' && !fact.note?.trim()
+          ? defaults.reviewStatus
+          : fact.reviewStatus,
+  });
+}
 
 function App() {
   const [profile, setProfile] = useState<FamilyHistoryProfile>(() => loadProfile());
@@ -116,26 +145,20 @@ function App() {
   const setFactStatus = (memberId: string, conditionId: ConditionId, status: FactStatus) => {
     setProfile((current) => {
       const existing = getFact(current, memberId, conditionId);
+      if (status === 'unanswered') {
+        if (!existing) {
+          return current;
+        }
+
+        return touchProfile({
+          ...current,
+          facts: current.facts.filter((fact) => fact.id !== existing.id),
+        });
+      }
+
       const nextFacts = existing
-        ? current.facts.map((fact) =>
-            fact.id === existing.id
-              ? {
-                  ...fact,
-                  status,
-                  ageAtOnset: status === 'present' ? fact.ageAtOnset : '',
-                }
-              : fact,
-          )
-        : [
-            ...current.facts,
-            {
-              id: `${memberId}-${conditionId}`,
-              memberId,
-              conditionId,
-              status,
-              ageAtOnset: '',
-            },
-          ];
+        ? current.facts.map((fact) => (fact.id === existing.id ? updateFactForStatus(existing, status)! : fact))
+        : [...current.facts, createFactRecord(memberId, conditionId, status)];
 
       return touchProfile({
         ...current,
@@ -152,23 +175,9 @@ function App() {
       for (const conditionId of clusterConditionIds) {
         const existing = nextFacts.find((fact) => fact.memberId === memberId && fact.conditionId === conditionId);
         if (existing) {
-          nextFacts = nextFacts.map((fact) =>
-            fact.id === existing.id
-              ? {
-                  ...fact,
-                  status,
-                  ageAtOnset: status === 'present' ? fact.ageAtOnset : '',
-                }
-              : fact,
-          );
+          nextFacts = nextFacts.map((fact) => (fact.id === existing.id ? updateFactForStatus(existing, status)! : fact));
         } else {
-          nextFacts.push({
-            id: `${memberId}-${conditionId}`,
-            memberId,
-            conditionId,
-            status,
-            ageAtOnset: '',
-          });
+          nextFacts.push(createFactRecord(memberId, conditionId, status));
         }
       }
 
@@ -198,7 +207,25 @@ function App() {
 
       return touchProfile({
         ...current,
-        facts: current.facts.map((fact) => (fact.id === existing.id ? { ...fact, ageAtOnset } : fact)),
+        facts: current.facts.map((fact) => (fact.id === existing.id ? touchFact(fact, { ageAtOnset }) : fact)),
+      });
+    });
+  };
+
+  const setFactReviewMeta = (
+    memberId: string,
+    conditionId: ConditionId,
+    patch: Partial<Pick<FamilyHistoryFact, 'source' | 'confidence' | 'reviewStatus' | 'note'>>,
+  ) => {
+    setProfile((current) => {
+      const existing = getFact(current, memberId, conditionId);
+      if (!existing) {
+        return current;
+      }
+
+      return touchProfile({
+        ...current,
+        facts: current.facts.map((fact) => (fact.id === existing.id ? touchFact(fact, patch) : fact)),
       });
     });
   };
@@ -626,6 +653,7 @@ function App() {
                             profile={profile}
                             setFactStatus={setFactStatus}
                             setFactAge={setFactAge}
+                            setFactReviewMeta={setFactReviewMeta}
                             bulkSetCluster={bulkSetCluster}
                             clearCluster={clearCluster}
                           />
@@ -862,6 +890,7 @@ function ConditionClusterEditor({
   profile,
   setFactStatus,
   setFactAge,
+  setFactReviewMeta,
   bulkSetCluster,
   clearCluster,
 }: {
@@ -870,6 +899,11 @@ function ConditionClusterEditor({
   profile: FamilyHistoryProfile;
   setFactStatus: (memberId: string, conditionId: ConditionId, status: FactStatus) => void;
   setFactAge: (memberId: string, conditionId: ConditionId, ageAtOnset: string) => void;
+  setFactReviewMeta: (
+    memberId: string,
+    conditionId: ConditionId,
+    patch: Partial<Pick<FamilyHistoryFact, 'source' | 'confidence' | 'reviewStatus' | 'note'>>,
+  ) => void;
   bulkSetCluster: (memberId: string, clusterId: ClusterId, status: FactStatus) => void;
   clearCluster: (memberId: string, clusterId: ClusterId) => void;
 }) {
@@ -940,6 +974,74 @@ function ConditionClusterEditor({
                   />
                 </label>
               ) : null}
+              {status !== 'unanswered' && fact ? (
+                <div className="fact-review-block">
+                  <div className="fact-review-header">
+                    <div>
+                      <strong>Evidence and review</strong>
+                      <p>Keep source and certainty explicit so this can be handed off cleanly later.</p>
+                    </div>
+                    <span className={`review-state-pill ${fact.reviewStatus}`}>
+                      {fact.reviewStatus === 'ready_to_share' ? 'Ready to share' : 'Needs follow-up'}
+                    </span>
+                  </div>
+                  <div className="fact-review-grid">
+                    <label className="field compact-field">
+                      <span>Source</span>
+                      <select
+                        value={fact.source}
+                        onChange={(event) =>
+                          setFactReviewMeta(member.id, condition.id, { source: event.target.value as FactSource })
+                        }
+                      >
+                        {FACT_SOURCE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field compact-field">
+                      <span>Confidence</span>
+                      <select
+                        value={fact.confidence}
+                        onChange={(event) =>
+                          setFactReviewMeta(member.id, condition.id, { confidence: event.target.value as FactConfidence })
+                        }
+                      >
+                        {FACT_CONFIDENCE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field compact-field">
+                      <span>Share status</span>
+                      <select
+                        value={fact.reviewStatus}
+                        onChange={(event) =>
+                          setFactReviewMeta(member.id, condition.id, { reviewStatus: event.target.value as FactReviewStatus })
+                        }
+                      >
+                        {FACT_REVIEW_STATUS_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <label className="field fact-note-field">
+                    <span>Note for later review</span>
+                    <input
+                      value={fact.note ?? ''}
+                      onChange={(event) => setFactReviewMeta(member.id, condition.id, { note: event.target.value })}
+                      placeholder="Ex: Age is approximate, confirmed over phone, record still needed"
+                    />
+                  </label>
+                </div>
+              ) : null}
             </article>
           );
         })}
@@ -974,6 +1076,8 @@ function OverviewTab({ profile, artifact, doctorNote }: { profile: FamilyHistory
         <MetricCard label="First-degree flags" value={artifact.firstDegreeFlags.length} />
         <MetricCard label="Second-degree flags" value={artifact.secondDegreeFlags.length} />
         <MetricCard label="Cluster signals" value={clusterSignals.length} />
+        <MetricCard label="Review-ready facts" value={artifact.readyToShareFactCount} />
+        <MetricCard label="Needs review" value={artifact.needsFollowupFactCount} />
         <MetricCard label="Follow-up prompts" value={artifact.missingQuestions.length} />
       </div>
 
@@ -1045,6 +1149,29 @@ function OverviewTab({ profile, artifact, doctorNote }: { profile: FamilyHistory
 
         <div className="overview-side-stack">
           <article className="data-card">
+            <p className="eyebrow">Review readiness</p>
+            <dl className="profile-facts">
+              <div>
+                <dt>Documented facts</dt>
+                <dd>{artifact.documentedFactCount}</dd>
+              </div>
+              <div>
+                <dt>Ready to share</dt>
+                <dd>{artifact.readyToShareFactCount}</dd>
+              </div>
+              <div>
+                <dt>Need follow-up</dt>
+                <dd>{artifact.needsFollowupFactCount}</dd>
+              </div>
+            </dl>
+            <ul className="clean-list compact-list compact-note-list">
+              {artifact.reviewabilityNotes.map((note) => (
+                <li key={note}>{note}</li>
+              ))}
+            </ul>
+          </article>
+
+          <article className="data-card">
             <p className="eyebrow">Profile context</p>
             <dl className="profile-facts">
               <div>
@@ -1109,6 +1236,14 @@ function MedCanonHandoffTab({ handoff }: { handoff: MedCanonHandoffPackage }) {
               <strong>{handoff.family_snapshot.first_degree_flag_count}</strong>
             </div>
             <div className="snapshot-card">
+              <span>Ready to share</span>
+              <strong>{handoff.family_snapshot.ready_to_share_fact_count}</strong>
+            </div>
+            <div className="snapshot-card">
+              <span>Need review</span>
+              <strong>{handoff.family_snapshot.needs_followup_fact_count}</strong>
+            </div>
+            <div className="snapshot-card">
               <span>Context entries</span>
               <strong>{handoff.medcanon_clinical_context.length}</strong>
             </div>
@@ -1136,6 +1271,13 @@ function MedCanonHandoffTab({ handoff }: { handoff: MedCanonHandoffPackage }) {
                   </div>
                   <h4>{signal.relative}</h4>
                   <p>{signal.handoff_line}</p>
+                  <div className="chip-row">
+                    <span className="chip">{signal.source.replace(/_/g, ' ')}</span>
+                    <span className="chip">{signal.confidence} confidence</span>
+                    <span className={`chip ${signal.review_required ? 'warning-chip' : ''}`}>
+                      {signal.review_status.replace(/_/g, ' ')}
+                    </span>
+                  </div>
                 </div>
               ))}
             </div>

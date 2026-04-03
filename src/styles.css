@@ -176,6 +176,10 @@ h3 {
   background: rgba(251, 253, 255, 0.9);
 }
 
+.metric-grid {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
 .metric-chip span,
 .metric-card span {
   display: block;
@@ -660,6 +664,72 @@ h3 {
   align-items: center;
 }
 
+.compact-field span {
+  font-size: 0.76rem;
+}
+
+.fact-review-block {
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid #e0e7f2;
+  padding-top: 12px;
+}
+
+.fact-review-header {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.fact-review-header strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.88rem;
+  color: #2f4164;
+}
+
+.fact-review-header p {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: #61779c;
+}
+
+.fact-review-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.fact-note-field {
+  gap: 6px;
+}
+
+.review-state-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 7px 11px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+.review-state-pill.ready_to_share {
+  background: #edf8f3;
+  color: #0f6c59;
+  border-color: #bee5d4;
+}
+
+.review-state-pill.needs_followup {
+  background: #fff1da;
+  color: #9a6211;
+  border-color: #f0d49d;
+}
+
 .question-grid {
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 }
@@ -1031,6 +1101,12 @@ h3 {
   border: 1px solid #d7e0ee;
 }
 
+.warning-chip {
+  background: #fff5e5;
+  color: #9a6211;
+  border-color: #eed09d;
+}
+
 .muted-chip {
   color: #697c9f;
 }
@@ -1041,6 +1117,10 @@ h3 {
 
 .compact-list {
   gap: 8px;
+}
+
+.compact-note-list {
+  margin-top: 14px;
 }
 
 .empty-card {
@@ -1066,7 +1146,7 @@ h3 {
 }
 
 .snapshot-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
 }
 
 .snapshot-card,
@@ -1210,6 +1290,10 @@ h3 {
   .sample-grid,
   .question-cluster-grid,
   .snapshot-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .fact-review-grid {
     grid-template-columns: 1fr;
   }
 

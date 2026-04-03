@@ -1,4 +1,12 @@
-import { getTrackedMembers, type FamilyHistoryFact, type FamilyHistoryProfile, type FamilyMember } from './profile';
+import {
+  factNeedsFollowup,
+  formatFactConfidenceLabel,
+  formatFactSourceLabel,
+  getTrackedMembers,
+  type FamilyHistoryFact,
+  type FamilyHistoryProfile,
+  type FamilyMember,
+} from './profile';
 import { CLUSTERS, CLUSTER_ORDER, CONDITIONS_BY_ID, type ClusterId } from './taxonomy';
 import { type SummaryArtifact } from './summary';
 
@@ -27,6 +35,11 @@ export interface HandoffFamilySignal {
   condition: string;
   cluster: string;
   handoff_line: string;
+  source: FamilyHistoryFact['source'];
+  confidence: FamilyHistoryFact['confidence'];
+  review_status: FamilyHistoryFact['reviewStatus'];
+  review_required: boolean;
+  last_updated_at: string;
 }
 
 export interface HandoffOpenQuestion {
@@ -60,6 +73,9 @@ export interface MedCanonHandoffPackage {
     second_degree_relative_count: number;
     first_degree_flag_count: number;
     second_degree_flag_count: number;
+    documented_fact_count: number;
+    ready_to_share_fact_count: number;
+    needs_followup_fact_count: number;
     notable_clusters: string[];
   };
   clinician_brief: string;
@@ -155,7 +171,10 @@ function conditionLine(member: FamilyMember, fact: FamilyHistoryFact): string {
   const condition = CONDITIONS_BY_ID[fact.conditionId];
   const relative = displayMemberName(member);
   const ageLine = fact.ageAtOnset?.trim() ? ` diagnosed at ${fact.ageAtOnset.trim()}` : '';
-  return `${relative} with ${condition.label.toLowerCase()}${ageLine}.`;
+  const sourceLine = `Source: ${formatFactSourceLabel(fact.source)}.`;
+  const confidenceLine = `Confidence: ${formatFactConfidenceLabel(fact.confidence)}.`;
+  const followupLine = factNeedsFollowup(fact) ? ' This detail still needs follow-up before reuse.' : '';
+  return `${relative} with ${condition.label.toLowerCase()}${ageLine}. ${sourceLine} ${confidenceLine}${followupLine}`.replace(/\s+/g, ' ').trim();
 }
 
 function clusterWeight(artifact: SummaryArtifact, clusterId: ClusterId): number {
@@ -208,6 +227,9 @@ function buildClinicianBrief(
       ? `First-degree history includes ${joinLabels(firstDegreeLabels)}.`
       : 'No first-degree family-history flags have been explicitly documented yet.',
     secondDegreeLabels.length > 0 ? `Additional second-degree history includes ${joinLabels(secondDegreeLabels)}.` : null,
+    artifact.documentedFactCount > 0
+      ? `${artifact.readyToShareFactCount} documented ${artifact.readyToShareFactCount === 1 ? 'fact is' : 'facts are'} marked ready to share and ${artifact.needsFollowupFactCount} ${artifact.needsFollowupFactCount === 1 ? 'fact still needs' : 'facts still need'} follow-up.`
+      : null,
     signals.length > 0 ? `Most salient facts: ${signals.slice(0, 3).map((signal) => signal.handoff_line).join(' ')}` : null,
     openQuestions.length > 0 ? `Still worth confirming: ${openQuestions[0].prompt}` : null,
     'Use this as clinician review context rather than as a patient diagnosis list.',
@@ -260,6 +282,11 @@ export function buildMedCanonHandoffPackage(
       condition: CONDITIONS_BY_ID[entry.fact.conditionId].label,
       cluster: CLUSTERS[entry.clusterId].label,
       handoff_line: conditionLine(entry.member, entry.fact),
+      source: entry.fact.source,
+      confidence: entry.fact.confidence,
+      review_status: entry.fact.reviewStatus,
+      review_required: factNeedsFollowup(entry.fact),
+      last_updated_at: entry.fact.lastUpdatedAt,
     }));
 
   const openQuestions = artifact.missingQuestions.slice(0, 3).map((question) => ({
@@ -272,6 +299,7 @@ export function buildMedCanonHandoffPackage(
   const clinicianBrief = buildClinicianBrief(profile, artifact, prominentClusters, salientSignals, openQuestions);
   const sourcePrefix = `fd-${slugify(profile.personal.nameOrLabel || 'patient')}`;
   const recordedAt = profile.updatedAt;
+  const packageNeedsReview = artifact.needsFollowupFactCount > 0 || openQuestions.length > 0;
 
   const medcanonClinicalContext: MedCanonClinicalContextEntry[] = [
     {
@@ -281,10 +309,10 @@ export function buildMedCanonHandoffPackage(
       origin: 'first_degree_family_history',
       source_id: `${sourcePrefix}-brief`,
       recorded_at: recordedAt,
-      review_required: true,
-      status: 'patient_reported',
+      review_required: packageNeedsReview,
+      status: packageNeedsReview ? 'needs_followup' : 'patient_reported',
       category: 'family_history',
-      tags: ['family_history', ...prominentClusterIds],
+      tags: ['family_history', 'profile_brief', ...prominentClusterIds, packageNeedsReview ? 'needs_followup' : 'ready_to_share'],
     },
     ...salientSignals.map((signal) => ({
       type: 'family_history_flag' as const,
@@ -292,11 +320,18 @@ export function buildMedCanonHandoffPackage(
       value: signal.handoff_line,
       origin: 'first_degree_family_history' as const,
       source_id: signal.id,
-      recorded_at: recordedAt,
-      review_required: true,
-      status: 'patient_reported' as const,
+      recorded_at: signal.last_updated_at,
+      review_required: signal.review_required,
+      status: signal.review_required ? 'needs_followup' as const : 'patient_reported' as const,
       category: 'family_history' as const,
-      tags: ['family_history', signal.cluster.toLowerCase().replace(/\s+/g, '_'), signal.degree.replace('-', '_')],
+      tags: [
+        'family_history',
+        signal.cluster.toLowerCase().replace(/\s+/g, '_'),
+        signal.degree.replace('-', '_'),
+        `source_${signal.source}`,
+        `confidence_${signal.confidence}`,
+        signal.review_status,
+      ],
     })),
     ...artifact.keyPatterns.slice(0, 3).map((pattern, index) => ({
       type: 'family_history_pattern' as const,
@@ -305,10 +340,10 @@ export function buildMedCanonHandoffPackage(
       origin: 'first_degree_family_history' as const,
       source_id: `${sourcePrefix}-pattern-${index + 1}`,
       recorded_at: recordedAt,
-      review_required: true,
-      status: 'patient_reported' as const,
+      review_required: packageNeedsReview,
+      status: packageNeedsReview ? 'needs_followup' as const : 'patient_reported' as const,
       category: 'family_history' as const,
-      tags: ['family_history', ...prominentClusterIds],
+      tags: ['family_history', ...prominentClusterIds, packageNeedsReview ? 'needs_followup' : 'ready_to_share'],
     })),
     ...openQuestions.map((question) => ({
       type: 'family_history_open_question' as const,
@@ -340,6 +375,9 @@ export function buildMedCanonHandoffPackage(
       second_degree_relative_count: secondDegreeMembers.length,
       first_degree_flag_count: artifact.firstDegreeFlags.length,
       second_degree_flag_count: artifact.secondDegreeFlags.length,
+      documented_fact_count: artifact.documentedFactCount,
+      ready_to_share_fact_count: artifact.readyToShareFactCount,
+      needs_followup_fact_count: artifact.needsFollowupFactCount,
       notable_clusters: prominentClusters,
     },
     clinician_brief: clinicianBrief,

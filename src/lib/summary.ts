@@ -1,5 +1,5 @@
 import { CLUSTERS, CLUSTER_ORDER, CONDITIONS_BY_ID, type ClusterId, type ConditionId } from './taxonomy';
-import { getFact, getTrackedMembers, type FamilyHistoryProfile, type FamilyMember } from './profile';
+import { factNeedsFollowup, getFact, getTrackedMembers, type FamilyHistoryProfile, type FamilyMember } from './profile';
 
 export interface MissingQuestion {
   id: string;
@@ -15,9 +15,13 @@ export interface SummaryArtifact {
   secondDegreeFlags: ConditionId[];
   keyPatterns: string[];
   clusterCounts: Record<ClusterId, { first: number; second: number }>;
+  documentedFactCount: number;
+  readyToShareFactCount: number;
+  needsFollowupFactCount: number;
   missingQuestions: MissingQuestion[];
   doctorVisitNotes: string[];
   incompletenessNotes: string[];
+  reviewabilityNotes: string[];
 }
 
 function joinLabels(labels: string[]): string {
@@ -40,10 +44,20 @@ function memberName(member: FamilyMember): string {
   return member.nameOptional?.trim() || member.displayLabel;
 }
 
+function pluralize(count: number, singular: string, plural = `${singular}s`): string {
+  return count === 1 ? singular : plural;
+}
+
 export function buildSummaryArtifact(profile: FamilyHistoryProfile): SummaryArtifact {
   const members = getTrackedMembers(profile);
   const firstDegreeMembers = members.filter((member) => member.degree === 'first');
   const secondDegreeMembers = members.filter((member) => member.degree === 'second');
+  const trackedMemberIds = new Set(members.map((member) => member.id));
+  const documentedFacts = profile.facts.filter(
+    (fact) => fact.status !== 'unanswered' && trackedMemberIds.has(fact.memberId),
+  );
+  const readyToShareFacts = documentedFacts.filter((fact) => !factNeedsFollowup(fact));
+  const needsFollowupFacts = documentedFacts.filter((fact) => factNeedsFollowup(fact));
 
   const firstDegreeFlags = new Set<ConditionId>();
   const secondDegreeFlags = new Set<ConditionId>();
@@ -51,6 +65,7 @@ export function buildSummaryArtifact(profile: FamilyHistoryProfile): SummaryArti
   const keyPatterns: string[] = [];
   const doctorVisitNotes: string[] = [];
   const incompletenessNotes: string[] = [];
+  const reviewabilityNotes: string[] = [];
   const clusterCounts = Object.fromEntries(
     CLUSTER_ORDER.map((cluster) => [cluster, { first: 0, second: 0 }]),
   ) as Record<ClusterId, { first: number; second: number }>;
@@ -143,6 +158,21 @@ export function buildSummaryArtifact(profile: FamilyHistoryProfile): SummaryArti
     incompletenessNotes.push('Cancer history is present, but some age-at-diagnosis details are still missing.');
   }
 
+  if (documentedFacts.length === 0) {
+    reviewabilityNotes.push('No documented family-history facts are marked ready to share yet.');
+  } else if (needsFollowupFacts.length === 0) {
+    reviewabilityNotes.push(`All ${documentedFacts.length} documented ${pluralize(documentedFacts.length, 'fact')} are marked ready to share.`);
+  } else {
+    reviewabilityNotes.push(
+      `${needsFollowupFacts.length} documented ${pluralize(needsFollowupFacts.length, 'fact')} still need source or confidence follow-up before reuse.`,
+    );
+    if (readyToShareFacts.length > 0) {
+      reviewabilityNotes.push(
+        `${readyToShareFacts.length} ${pluralize(readyToShareFacts.length, 'fact')} already look ready to share in a clinician handoff.`,
+      );
+    }
+  }
+
   if (keyPatterns.length === 0) {
     keyPatterns.push('This profile is still early. What you have entered so far is enough to start a clearer family history record.');
   }
@@ -155,6 +185,9 @@ export function buildSummaryArtifact(profile: FamilyHistoryProfile): SummaryArti
   }
   if (missingQuestions.length > 0) {
     doctorVisitNotes.push('Bring up that some family-history details are still incomplete, especially age at diagnosis where it is known to matter.');
+  }
+  if (needsFollowupFacts.length > 0) {
+    doctorVisitNotes.push('Mention which family-history items are approximate, family-reported, or still need confirmation.');
   }
   if (doctorVisitNotes.length === 0) {
     doctorVisitNotes.push('Bring this summary to future visits as a starting point, then keep adding details over time.');
@@ -174,9 +207,13 @@ export function buildSummaryArtifact(profile: FamilyHistoryProfile): SummaryArti
     secondDegreeFlags: [...secondDegreeFlags],
     keyPatterns,
     clusterCounts,
+    documentedFactCount: documentedFacts.length,
+    readyToShareFactCount: readyToShareFacts.length,
+    needsFollowupFactCount: needsFollowupFacts.length,
     missingQuestions: missingQuestions.slice(0, 8),
     doctorVisitNotes,
     incompletenessNotes,
+    reviewabilityNotes,
   };
 }
 

@@ -15,6 +15,9 @@ export type Relationship =
   | 'paternal_grandfather';
 export type AliveStatus = 'alive' | 'deceased' | 'unknown';
 export type FactStatus = 'present' | 'absent' | 'unknown' | 'unanswered';
+export type FactSource = 'patient_memory' | 'family_report' | 'medical_record' | 'clinician_confirmed' | 'unknown';
+export type FactConfidence = 'certain' | 'likely' | 'uncertain';
+export type FactReviewStatus = 'ready_to_share' | 'needs_followup';
 
 export interface FamilyMember {
   id: string;
@@ -36,6 +39,11 @@ export interface FamilyHistoryFact {
   conditionId: ConditionId;
   status: FactStatus;
   ageAtOnset?: string;
+  source: FactSource;
+  confidence: FactConfidence;
+  reviewStatus: FactReviewStatus;
+  note?: string;
+  lastUpdatedAt: string;
 }
 
 export interface PersonalProfile {
@@ -89,6 +97,11 @@ const factSchema = z.object({
   conditionId: z.string(),
   status: z.enum(['present', 'absent', 'unknown', 'unanswered']),
   ageAtOnset: z.string().optional(),
+  source: z.enum(['patient_memory', 'family_report', 'medical_record', 'clinician_confirmed', 'unknown']).optional(),
+  confidence: z.enum(['certain', 'likely', 'uncertain']).optional(),
+  reviewStatus: z.enum(['ready_to_share', 'needs_followup']).optional(),
+  note: z.string().optional(),
+  lastUpdatedAt: z.string().optional(),
 });
 
 const profileSchema = z.object({
@@ -163,6 +176,41 @@ const FIXED_MEMBERS: FamilyMember[] = [
 ];
 
 export const AGE_RANGES = ['', 'Under 18', '18-29', '30-39', '40-49', '50-59', '60-69', '70+'];
+export const FACT_SOURCE_OPTIONS: Array<{ value: FactSource; label: string }> = [
+  { value: 'patient_memory', label: 'Patient memory' },
+  { value: 'family_report', label: 'Family told me' },
+  { value: 'medical_record', label: 'Medical record' },
+  { value: 'clinician_confirmed', label: 'Clinician confirmed' },
+  { value: 'unknown', label: 'Source unclear' },
+];
+export const FACT_CONFIDENCE_OPTIONS: Array<{ value: FactConfidence; label: string }> = [
+  { value: 'certain', label: 'Certain' },
+  { value: 'likely', label: 'Pretty sure' },
+  { value: 'uncertain', label: 'Not very sure' },
+];
+export const FACT_REVIEW_STATUS_OPTIONS: Array<{ value: FactReviewStatus; label: string }> = [
+  { value: 'ready_to_share', label: 'Ready to share' },
+  { value: 'needs_followup', label: 'Needs follow-up' },
+];
+
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+function normalizeFact(value: z.infer<typeof factSchema>): FamilyHistoryFact {
+  return {
+    id: value.id,
+    memberId: value.memberId,
+    conditionId: value.conditionId as ConditionId,
+    status: value.status,
+    ageAtOnset: value.ageAtOnset ?? '',
+    source: value.source ?? 'patient_memory',
+    confidence: value.confidence ?? 'likely',
+    reviewStatus: value.reviewStatus ?? 'ready_to_share',
+    note: value.note ?? '',
+    lastUpdatedAt: value.lastUpdatedAt ?? nowIso(),
+  };
+}
 
 export function cloneFixedMembers(): FamilyMember[] {
   return FIXED_MEMBERS.map((member) => ({ ...member }));
@@ -185,7 +233,14 @@ export function createBlankProfile(): FamilyHistoryProfile {
 
 export function parseProfile(value: unknown): FamilyHistoryProfile | null {
   const result = profileSchema.safeParse(value);
-  return result.success ? (result.data as FamilyHistoryProfile) : null;
+  if (!result.success) {
+    return null;
+  }
+
+  return {
+    ...(result.data as FamilyHistoryProfile),
+    facts: result.data.facts.map((fact) => normalizeFact(fact)),
+  };
 }
 
 export function createSibling(index: number): FamilyMember {
@@ -204,8 +259,51 @@ export function createSibling(index: number): FamilyMember {
 export function touchProfile(profile: FamilyHistoryProfile): FamilyHistoryProfile {
   return {
     ...profile,
-    updatedAt: new Date().toISOString(),
+    updatedAt: nowIso(),
   };
+}
+
+export function createFactRecord(memberId: string, conditionId: ConditionId, status: FactStatus): FamilyHistoryFact {
+  const unresolved = status === 'unknown' || status === 'unanswered';
+  return normalizeFact({
+    id: `${memberId}-${conditionId}`,
+    memberId,
+    conditionId,
+    status,
+    ageAtOnset: '',
+    source: unresolved ? 'unknown' : 'patient_memory',
+    confidence: unresolved ? 'uncertain' : 'likely',
+    reviewStatus: unresolved ? 'needs_followup' : 'ready_to_share',
+    note: '',
+    lastUpdatedAt: nowIso(),
+  });
+}
+
+export function touchFact(
+  fact: FamilyHistoryFact,
+  patch: Partial<Omit<FamilyHistoryFact, 'id' | 'memberId' | 'conditionId'>>,
+): FamilyHistoryFact {
+  return normalizeFact({
+    ...fact,
+    ...patch,
+    lastUpdatedAt: nowIso(),
+  });
+}
+
+export function factNeedsFollowup(fact: FamilyHistoryFact): boolean {
+  return fact.reviewStatus === 'needs_followup' || fact.confidence === 'uncertain' || fact.source === 'unknown';
+}
+
+export function formatFactSourceLabel(source: FactSource): string {
+  return FACT_SOURCE_OPTIONS.find((option) => option.value === source)?.label ?? source;
+}
+
+export function formatFactConfidenceLabel(confidence: FactConfidence): string {
+  return FACT_CONFIDENCE_OPTIONS.find((option) => option.value === confidence)?.label ?? confidence;
+}
+
+export function formatFactReviewStatusLabel(reviewStatus: FactReviewStatus): string {
+  return FACT_REVIEW_STATUS_OPTIONS.find((option) => option.value === reviewStatus)?.label ?? reviewStatus;
 }
 
 export function getTrackedMembers(profile: FamilyHistoryProfile): FamilyMember[] {

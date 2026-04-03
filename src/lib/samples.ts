@@ -1,4 +1,13 @@
-import { createBlankProfile, createSibling, touchProfile, type FamilyHistoryFact, type FamilyHistoryProfile, type FamilyMember } from './profile';
+import {
+  createBlankProfile,
+  createFactRecord,
+  createSibling,
+  touchFact,
+  touchProfile,
+  type FamilyHistoryFact,
+  type FamilyHistoryProfile,
+  type FamilyMember,
+} from './profile';
 import { type ConditionId } from './taxonomy';
 
 export interface SampleProfile {
@@ -17,14 +26,16 @@ function includeMember(member: FamilyMember, patch: Partial<FamilyMember> = {}):
   };
 }
 
-function fact(memberId: string, conditionId: ConditionId, ageAtOnset?: string): FamilyHistoryFact {
-  return {
-    id: `${memberId}-${conditionId}`,
-    memberId,
-    conditionId,
-    status: 'present',
+function fact(
+  memberId: string,
+  conditionId: ConditionId,
+  ageAtOnset?: string,
+  patch: Partial<Omit<FamilyHistoryFact, 'id' | 'memberId' | 'conditionId' | 'status'>> = {},
+): FamilyHistoryFact {
+  return touchFact(createFactRecord(memberId, conditionId, 'present'), {
     ageAtOnset: ageAtOnset ?? '',
-  };
+    ...patch,
+  });
 }
 
 function cardioSample(): FamilyHistoryProfile {
@@ -46,14 +57,14 @@ function cardioSample(): FamilyHistoryProfile {
   });
 
   const facts: FamilyHistoryFact[] = [
-    fact('mother', 'high_blood_pressure'),
-    fact('mother', 'high_cholesterol'),
-    fact('father', 'heart_disease', '54'),
-    fact('father', 'stroke', '58'),
-    fact('sibling-1-seed', 'high_cholesterol'),
-    fact('maternal-grandfather', 'heart_disease', '61'),
-    fact('maternal-grandfather', 'diabetes'),
-    fact('paternal-grandmother', 'stroke', '72'),
+    fact('mother', 'high_blood_pressure', '', { confidence: 'certain', source: 'patient_memory' }),
+    fact('mother', 'high_cholesterol', '', { confidence: 'likely', source: 'family_report' }),
+    fact('father', 'heart_disease', '54', { confidence: 'certain', source: 'family_report' }),
+    fact('father', 'stroke', '58', { confidence: 'likely', source: 'family_report' }),
+    fact('sibling-1-seed', 'high_cholesterol', '', { confidence: 'likely', source: 'patient_memory' }),
+    fact('maternal-grandfather', 'heart_disease', '61', { confidence: 'likely', source: 'family_report' }),
+    fact('maternal-grandfather', 'diabetes', '', { confidence: 'likely', source: 'family_report' }),
+    fact('paternal-grandmother', 'stroke', '72', { confidence: 'certain', source: 'family_report' }),
   ];
 
   sibling.id = 'sibling-1-seed';
@@ -99,11 +110,11 @@ function cancerSample(): FamilyHistoryProfile {
     },
     members: [...members, sibling],
     facts: [
-      fact('mother', 'breast_cancer', '46'),
-      fact('maternal-grandmother', 'ovarian_cancer', '59'),
-      fact('paternal-grandfather', 'colon_cancer', '68'),
-      fact('father', 'prostate_cancer', '63'),
-      fact('sibling-cancer', 'breast_cancer'),
+      fact('mother', 'breast_cancer', '46', { confidence: 'certain', source: 'medical_record' }),
+      fact('maternal-grandmother', 'ovarian_cancer', '59', { confidence: 'likely', source: 'family_report' }),
+      fact('paternal-grandfather', 'colon_cancer', '68', { confidence: 'likely', source: 'family_report' }),
+      fact('father', 'prostate_cancer', '63', { confidence: 'certain', source: 'family_report' }),
+      fact('sibling-cancer', 'breast_cancer', '', { confidence: 'likely', source: 'patient_memory' }),
     ],
   });
 }
@@ -132,7 +143,10 @@ function mixedSample(): FamilyHistoryProfile {
       reasonForStarting: 'Getting organized before a new primary care visit',
     },
     members,
-    facts: [fact('mother', 'diabetes'), fact('maternal-grandmother', 'dementia', '74')],
+    facts: [
+      fact('mother', 'diabetes', '', { confidence: 'likely', source: 'patient_memory' }),
+      fact('maternal-grandmother', 'dementia', '74', { confidence: 'uncertain', source: 'family_report', reviewStatus: 'needs_followup' }),
+    ],
   });
 }
 
@@ -173,15 +187,15 @@ function medCanonDemoSample(): FamilyHistoryProfile {
     },
     members: [...members, sibling],
     facts: [
-      fact('mother', 'breast_cancer', '46'),
-      fact('mother', 'high_blood_pressure'),
-      fact('father', 'heart_disease', '52'),
-      fact('father', 'stroke'),
-      fact('father', 'diabetes'),
-      fact('sibling-featured-1', 'high_cholesterol'),
-      fact('maternal-grandmother', 'ovarian_cancer'),
-      fact('maternal-grandfather', 'heart_disease'),
-      fact('paternal-grandfather', 'colon_cancer', '70'),
+      fact('mother', 'breast_cancer', '46', { confidence: 'certain', source: 'medical_record' }),
+      fact('mother', 'high_blood_pressure', '', { confidence: 'likely', source: 'patient_memory' }),
+      fact('father', 'heart_disease', '52', { confidence: 'likely', source: 'family_report' }),
+      fact('father', 'stroke', '', { confidence: 'uncertain', source: 'family_report', reviewStatus: 'needs_followup' }),
+      fact('father', 'diabetes', '', { confidence: 'likely', source: 'family_report' }),
+      fact('sibling-featured-1', 'high_cholesterol', '', { confidence: 'likely', source: 'patient_memory' }),
+      fact('maternal-grandmother', 'ovarian_cancer', '', { confidence: 'uncertain', source: 'family_report', reviewStatus: 'needs_followup' }),
+      fact('maternal-grandfather', 'heart_disease', '', { confidence: 'likely', source: 'family_report' }),
+      fact('paternal-grandfather', 'colon_cancer', '70', { confidence: 'certain', source: 'family_report' }),
     ],
   });
 }
