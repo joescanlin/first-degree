@@ -4,15 +4,19 @@ import {
   formatAlcoholUseLabel,
   formatPersonalContextKindLabel,
   formatPregnancyContextLabel,
+  formatRecentUpdateKindLabel,
   formatFactSourceLabel,
   formatTobaccoNicotineStatusLabel,
   getCompletePersonalContextItems,
+  getCompleteRecentUpdates,
   getTrackedMembers,
   personalContextItemNeedsFollowup,
+  recentUpdateNeedsFollowup,
   type FamilyHistoryFact,
   type FamilyHistoryProfile,
   type FamilyMember,
   type PersonalContextItem,
+  type RecentUpdateItem,
 } from './profile';
 import { CLUSTERS, CLUSTER_ORDER, CONDITIONS_BY_ID, type ClusterId } from './taxonomy';
 import { type SummaryArtifact } from './summary';
@@ -27,7 +31,7 @@ type HandoffContextType =
   | 'recent_change';
 type HandoffStatus = 'patient_reported' | 'needs_followup';
 type HandoffCategory = 'family_history' | 'patient_context';
-export type HandoffDomain = 'family_history' | PersonalContextItem['kind'] | 'care_preference';
+export type HandoffDomain = 'family_history' | PersonalContextItem['kind'] | 'care_preference' | 'recent_update';
 export type VisitMode = 'general_intake' | 'preventive' | 'acute_symptom' | 'medication_follow_up' | 'chronic_follow_up';
 
 export const VISIT_MODE_OPTIONS: Array<{ value: VisitMode; label: string; description: string }> = [
@@ -323,30 +327,35 @@ const PERSONAL_CONTEXT_MODE_SCORES: Record<VisitMode, Record<Exclude<HandoffDoma
     allergy: 88,
     condition: 92,
     care_preference: 78,
+    recent_update: 88,
   },
   preventive: {
     medication: 66,
     allergy: 60,
     condition: 82,
     care_preference: 74,
+    recent_update: 70,
   },
   acute_symptom: {
     medication: 98,
     allergy: 96,
     condition: 92,
     care_preference: 72,
+    recent_update: 96,
   },
   medication_follow_up: {
     medication: 99,
     allergy: 86,
     condition: 82,
     care_preference: 90,
+    recent_update: 88,
   },
   chronic_follow_up: {
     medication: 92,
     allergy: 76,
     condition: 98,
     care_preference: 82,
+    recent_update: 90,
   },
 };
 
@@ -381,6 +390,15 @@ function personalContextLine(item: PersonalContextItem): string {
   const sourceLine = ` Source: ${formatFactSourceLabel(item.source)}.`;
   const confidenceLine = ` Confidence: ${formatFactConfidenceLabel(item.confidence)}.`;
   const followupLine = personalContextItemNeedsFollowup(item) ? ' This detail still needs follow-up before reuse.' : '';
+  return `${kindLabel}: ${item.label.trim()}.${detailLine}${sourceLine}${confidenceLine}${followupLine}`.replace(/\s+/g, ' ').trim();
+}
+
+function recentUpdateLine(item: RecentUpdateItem): string {
+  const kindLabel = formatRecentUpdateKindLabel(item.kind);
+  const detailLine = item.detail?.trim() ? ` ${item.detail.trim()}.` : '';
+  const sourceLine = ` Source: ${formatFactSourceLabel(item.source)}.`;
+  const confidenceLine = ` Confidence: ${formatFactConfidenceLabel(item.confidence)}.`;
+  const followupLine = recentUpdateNeedsFollowup(item) ? ' This update still needs follow-up before reuse.' : '';
   return `${kindLabel}: ${item.label.trim()}.${detailLine}${sourceLine}${confidenceLine}${followupLine}`.replace(/\s+/g, ' ').trim();
 }
 
@@ -425,6 +443,47 @@ function scorePatientContextForVisit(
 ): { score: number; reason: string } {
   let score = PERSONAL_CONTEXT_MODE_SCORES[visitMode][domain];
   const normalized = label.toLowerCase();
+
+  if (domain === 'recent_update') {
+    if (normalized.includes('symptom')) {
+      if (visitMode === 'acute_symptom') {
+        score += 14;
+      } else if (visitMode === 'general_intake') {
+        score += 6;
+      }
+    }
+    if (normalized.includes('medication')) {
+      if (visitMode === 'medication_follow_up' || visitMode === 'chronic_follow_up') {
+        score += 12;
+      }
+    }
+    if (normalized.includes('diagnosis')) {
+      if (visitMode === 'chronic_follow_up' || visitMode === 'general_intake') {
+        score += 10;
+      }
+    }
+    if (normalized.includes('family')) {
+      if (visitMode === 'preventive' || visitMode === 'general_intake') {
+        score += 8;
+      }
+    }
+    if (normalized.includes('document')) {
+      score += 4;
+    }
+
+    const reason =
+      normalized.includes('symptom')
+        ? 'A recent symptom change should stay visible because it can change triage and follow-up quickly.'
+        : normalized.includes('medication')
+          ? 'Recent medication changes should stay close to the top because they can change treatment framing and refill decisions.'
+          : normalized.includes('diagnosis')
+            ? 'A newly recorded diagnosis changes the baseline clinical context for future visits.'
+            : normalized.includes('family')
+              ? 'A recent family-history discovery can change preventive framing and what clinicians ask next.'
+              : 'Recent patient updates belong in the handoff because they may matter more than older background context.';
+
+    return { score, reason };
+  }
 
   if (domain === 'care_preference') {
     if (normalized.includes('visit goal')) {
@@ -572,6 +631,9 @@ function buildClinicianBrief(
     patientMemory.length > 0
       ? `Patient memory also includes ${artifact.patientContextCounts.medications} ${artifact.patientContextCounts.medications === 1 ? 'medication' : 'medications'}, ${artifact.patientContextCounts.allergies} ${artifact.patientContextCounts.allergies === 1 ? 'allergy' : 'allergies'}, and ${artifact.patientContextCounts.chronicConditions} chronic ${artifact.patientContextCounts.chronicConditions === 1 ? 'condition' : 'conditions'}.`
       : null,
+    artifact.patientContextCounts.recentUpdates > 0
+      ? `${artifact.patientContextCounts.recentUpdates} ${artifact.patientContextCounts.recentUpdates === 1 ? 'recent update is' : 'recent updates are'} also packaged for visit framing.`
+      : null,
     profile.personal.visitGoal?.trim() ? `Visit goal: ${profile.personal.visitGoal.trim()}` : null,
     preferenceParts.length > 0 ? `Care preferences: ${joinLabels(preferenceParts)}.` : null,
     signals.length > 0 ? `Most salient facts: ${signals.slice(0, 3).map((signal) => signal.handoff_line).join(' ')}` : null,
@@ -614,6 +676,7 @@ export function buildMedCanonHandoffPackage(
   const medications = getCompletePersonalContextItems(profile.personal.medications);
   const allergies = getCompletePersonalContextItems(profile.personal.allergies);
   const chronicConditions = getCompletePersonalContextItems(profile.personal.chronicConditions);
+  const recentUpdates = getCompleteRecentUpdates(profile.personal.recentUpdates);
   const patientMemoryItems = [...medications, ...allergies, ...chronicConditions];
   const prominentClusterIds = CLUSTER_ORDER
     .filter((clusterId) => artifact.clusterCounts[clusterId].first + artifact.clusterCounts[clusterId].second > 0)
@@ -696,6 +759,21 @@ export function buildMedCanonHandoffPackage(
 
   const patientMemory = patientMemoryItems
     .map((item) => mapPatientMemoryItem(item))
+    .sort((left, right) => right.relevance_score - left.relevance_score);
+
+  const recentChangesFromProfile: HandoffRecentChange[] = recentUpdates
+    .map((item) => {
+      const relevance = scorePatientContextForVisit('recent_update', `${formatRecentUpdateKindLabel(item.kind)} ${item.label}`, visitMode);
+      return {
+        id: `recent-${item.id}`,
+        domain: 'recent_update' as const,
+        label: `${formatRecentUpdateKindLabel(item.kind)} · ${item.label.trim()}`,
+        changed_at: item.lastUpdatedAt,
+        summary: recentUpdateLine(item),
+        review_required: recentUpdateNeedsFollowup(item),
+        relevance_score: relevance.score,
+      };
+    })
     .sort((left, right) => right.relevance_score - left.relevance_score);
 
   const buildCarePreferenceFact = (
@@ -821,6 +899,7 @@ export function buildMedCanonHandoffPackage(
   const packageNeedsReview = artifact.needsFollowupFactCount > 0 || openQuestions.length > 0;
 
   const recentChanges: HandoffRecentChange[] = [
+    ...recentChangesFromProfile,
     ...familyHistoryFlags.map((signal) => ({
       id: `recent-${signal.id}`,
       domain: 'family_history' as const,

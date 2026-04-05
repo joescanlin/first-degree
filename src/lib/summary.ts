@@ -6,15 +6,19 @@ import {
   formatFactSourceLabel,
   formatPersonalContextKindLabel,
   formatPregnancyContextLabel,
+  formatRecentUpdateKindLabel,
   formatTobaccoNicotineStatusLabel,
   getCompletePersonalContextItems,
+  getCompleteRecentUpdates,
   getFact,
   getTrackedMembers,
   personalContextItemNeedsFollowup,
+  recentUpdateNeedsFollowup,
   type FamilyHistoryFact,
   type FamilyHistoryProfile,
   type FamilyMember,
   type PersonalContextItem,
+  type RecentUpdateItem,
 } from './profile';
 
 export interface MissingQuestion {
@@ -67,6 +71,7 @@ export interface SummaryArtifact {
     medications: number;
     allergies: number;
     chronicConditions: number;
+    recentUpdates: number;
     total: number;
   };
   patientContextNotes: string[];
@@ -140,6 +145,16 @@ function buildPersonalContextTimelineDetail(item: PersonalContextItem): string {
     .trim();
 }
 
+function buildRecentUpdateTimelineDetail(item: RecentUpdateItem): string {
+  const detailLine = item.detail?.trim() ? `${item.detail.trim()}. ` : '';
+  const reviewLine = recentUpdateNeedsFollowup(item)
+    ? 'This update still needs confirmation before wider reuse.'
+    : 'This update looks ready to carry into the next handoff.';
+  return `${detailLine}Source: ${formatFactSourceLabel(item.source)}. Confidence: ${formatFactConfidenceLabel(item.confidence)}. ${reviewLine}`
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export function buildSummaryArtifact(profile: FamilyHistoryProfile): SummaryArtifact {
   const members = getTrackedMembers(profile);
   const firstDegreeMembers = members.filter((member) => member.degree === 'first');
@@ -149,6 +164,7 @@ export function buildSummaryArtifact(profile: FamilyHistoryProfile): SummaryArti
   const medications = getCompletePersonalContextItems(profile.personal.medications);
   const allergies = getCompletePersonalContextItems(profile.personal.allergies);
   const chronicConditions = getCompletePersonalContextItems(profile.personal.chronicConditions);
+  const recentUpdates = getCompleteRecentUpdates(profile.personal.recentUpdates);
   const patientMemoryItems = [...medications, ...allergies, ...chronicConditions];
   const documentedFacts = profile.facts.filter(
     (fact) => fact.status !== 'unanswered' && trackedMemberIds.has(fact.memberId),
@@ -157,9 +173,11 @@ export function buildSummaryArtifact(profile: FamilyHistoryProfile): SummaryArti
   const needsFollowupFacts = documentedFacts.filter((fact) => factNeedsFollowup(fact));
   const readyToShareMemoryItems = patientMemoryItems.filter((item) => !personalContextItemNeedsFollowup(item));
   const needsFollowupMemoryItems = patientMemoryItems.filter((item) => personalContextItemNeedsFollowup(item));
-  const documentedContextCount = documentedFacts.length + patientMemoryItems.length;
-  const readyContextCount = readyToShareFacts.length + readyToShareMemoryItems.length;
-  const needsFollowupCount = needsFollowupFacts.length + needsFollowupMemoryItems.length;
+  const readyToShareRecentUpdates = recentUpdates.filter((item) => !recentUpdateNeedsFollowup(item));
+  const needsFollowupRecentUpdates = recentUpdates.filter((item) => recentUpdateNeedsFollowup(item));
+  const documentedContextCount = documentedFacts.length + patientMemoryItems.length + recentUpdates.length;
+  const readyContextCount = readyToShareFacts.length + readyToShareMemoryItems.length + readyToShareRecentUpdates.length;
+  const needsFollowupCount = needsFollowupFacts.length + needsFollowupMemoryItems.length + needsFollowupRecentUpdates.length;
 
   const firstDegreeFlags = new Set<ConditionId>();
   const secondDegreeFlags = new Set<ConditionId>();
@@ -271,6 +289,9 @@ export function buildSummaryArtifact(profile: FamilyHistoryProfile): SummaryArti
   if (chronicConditions.length > 0) {
     patientContextCountParts.push(`${chronicConditions.length} ${pluralize(chronicConditions.length, 'chronic condition')}`);
   }
+  if (recentUpdates.length > 0) {
+    patientContextCountParts.push(`${recentUpdates.length} ${pluralize(recentUpdates.length, 'recent update')}`);
+  }
 
   if (patientContextCountParts.length > 0) {
     patientContextNotes.push(`Patient memory also includes ${joinLabels(patientContextCountParts)}.`);
@@ -304,6 +325,13 @@ export function buildSummaryArtifact(profile: FamilyHistoryProfile): SummaryArti
   }
   if (profile.personal.healthWorries?.trim()) {
     patientContextNotes.push(`Main health worry: ${profile.personal.healthWorries.trim()}`);
+  }
+  if (recentUpdates.length > 0) {
+    patientContextNotes.push(
+      `Recent updates recorded: ${joinLabels(
+        recentUpdates.slice(0, 3).map((item) => `${formatRecentUpdateKindLabel(item.kind).toLowerCase()} - ${item.label.trim()}`),
+      )}.`,
+    );
   }
   if (profile.personal.preferredLanguage?.trim() || profile.personal.pronouns?.trim() || profile.personal.preferredPharmacy?.trim()) {
     const preferenceParts = [
@@ -374,6 +402,13 @@ export function buildSummaryArtifact(profile: FamilyHistoryProfile): SummaryArti
   }
   if (profile.personal.preferredPharmacy?.trim()) {
     doctorVisitNotes.push(`Preferred pharmacy is ${profile.personal.preferredPharmacy.trim()}.`);
+  }
+  if (recentUpdates.length > 0) {
+    doctorVisitNotes.push(
+      `Lead with recent changes: ${joinLabels(
+        recentUpdates.slice(0, 3).map((item) => `${formatRecentUpdateKindLabel(item.kind).toLowerCase()} - ${item.label.trim()}`),
+      )}.`,
+    );
   }
   if (needsFollowupCount > 0) {
     doctorVisitNotes.push('Mention which context items are approximate, family-reported, or still need confirmation.');
@@ -510,6 +545,19 @@ export function buildSummaryArtifact(profile: FamilyHistoryProfile): SummaryArti
 
   const durableFacts: MemoryTimelineItem[] = [...durablePatientMemoryFacts, ...durableProfileFacts].sort(sortTimelineItems);
 
+  const recentUpdateTimelineItems: MemoryTimelineItem[] = recentUpdates
+    .map(
+      (item): MemoryTimelineItem => ({
+        id: `recent-update-${item.id}`,
+        title: `${formatRecentUpdateKindLabel(item.kind)} · ${item.label.trim()}`,
+        detail: buildRecentUpdateTimelineDetail(item),
+        timestamp: item.lastUpdatedAt,
+        status: recentUpdateNeedsFollowup(item) ? 'needs_followup' : 'ready_to_share',
+        tags: [item.kind, item.source, item.confidence],
+      }),
+    )
+    .sort(sortTimelineItems);
+
   const openQuestionItems = missingQuestions
     .map(
       (question): MemoryTimelineItem => ({
@@ -523,9 +571,15 @@ export function buildSummaryArtifact(profile: FamilyHistoryProfile): SummaryArti
     )
     .sort(sortTimelineItems);
 
-  const recentChanges: MemoryTimelineItem[] = [...familyDiscoveries, ...durablePatientMemoryFacts].sort(sortTimelineItems).slice(0, 10);
-  const readyToShareTimelineCount = [...familyDiscoveries, ...durableFacts].filter((item) => item.status === 'ready_to_share').length;
-  const needsFollowupTimelineCount = [...familyDiscoveries, ...durableFacts].filter((item) => item.status === 'needs_followup').length;
+  const recentChanges: MemoryTimelineItem[] = [...recentUpdateTimelineItems, ...familyDiscoveries, ...durablePatientMemoryFacts]
+    .sort(sortTimelineItems)
+    .slice(0, 10);
+  const readyToShareTimelineCount = [...recentUpdateTimelineItems, ...familyDiscoveries, ...durableFacts].filter(
+    (item) => item.status === 'ready_to_share',
+  ).length;
+  const needsFollowupTimelineCount = [...recentUpdateTimelineItems, ...familyDiscoveries, ...durableFacts].filter(
+    (item) => item.status === 'needs_followup',
+  ).length;
 
   const plainLanguageSummary = [
     keyPatterns[0],
@@ -548,7 +602,8 @@ export function buildSummaryArtifact(profile: FamilyHistoryProfile): SummaryArti
       medications: medications.length,
       allergies: allergies.length,
       chronicConditions: chronicConditions.length,
-      total: patientMemoryItems.length,
+      recentUpdates: recentUpdates.length,
+      total: patientMemoryItems.length + recentUpdates.length,
     },
     patientContextNotes,
     missingQuestions: missingQuestions.slice(0, 8),

@@ -7,22 +7,27 @@ import {
   FACT_REVIEW_STATUS_OPTIONS,
   FACT_SOURCE_OPTIONS,
   PREGNANCY_CONTEXT_OPTIONS,
+  RECENT_UPDATE_KIND_OPTIONS,
   TOBACCO_NICOTINE_OPTIONS,
   countAnsweredFactsForMember,
   countPresentFactsForMember,
   createBlankProfile,
   createFactRecord,
   createPersonalContextItem,
+  createRecentUpdateItem,
   formatAlcoholUseLabel,
   formatPregnancyContextLabel,
+  formatRecentUpdateKindLabel,
   formatTobaccoNicotineStatusLabel,
   createSibling,
   getCompletePersonalContextItems,
+  getCompleteRecentUpdates,
   getFact,
   getTrackedMembers,
   parseProfile,
   touchFact,
   touchPersonalContextItem,
+  touchRecentUpdateItem,
   touchProfile,
   type FamilyHistoryFact,
   type FamilyHistoryProfile,
@@ -33,6 +38,7 @@ import {
   type FactStatus,
   type PersonalContextItem,
   type PersonalContextKind,
+  type RecentUpdateItem,
   type StepId,
 } from './lib/profile';
 import { SAMPLE_PROFILES } from './lib/samples';
@@ -287,6 +293,42 @@ function App() {
         personal: {
           ...current.personal,
           [collection]: current.personal[collection].filter((item) => item.id !== itemId),
+        },
+      }),
+    );
+  };
+
+  const addRecentUpdate = () => {
+    setProfile((current) =>
+      touchProfile({
+        ...current,
+        personal: {
+          ...current.personal,
+          recentUpdates: [...current.personal.recentUpdates, createRecentUpdateItem()],
+        },
+      }),
+    );
+  };
+
+  const updateRecentUpdate = (itemId: string, patch: Partial<Omit<RecentUpdateItem, 'id'>>) => {
+    setProfile((current) =>
+      touchProfile({
+        ...current,
+        personal: {
+          ...current.personal,
+          recentUpdates: current.personal.recentUpdates.map((item) => (item.id === itemId ? touchRecentUpdateItem(item, patch) : item)),
+        },
+      }),
+    );
+  };
+
+  const removeRecentUpdate = (itemId: string) => {
+    setProfile((current) =>
+      touchProfile({
+        ...current,
+        personal: {
+          ...current.personal,
+          recentUpdates: current.personal.recentUpdates.filter((item) => item.id !== itemId),
         },
       }),
     );
@@ -658,7 +700,7 @@ function App() {
                   <li>Current medications and how you take them</li>
                   <li>Allergies and the reaction if you know it</li>
                   <li>Chronic conditions you want a clinician to keep in view</li>
-                  <li>Pregnancy context, substance summary, barriers, and the worries you want surfaced</li>
+                  <li>Pregnancy context, recent changes, barriers, and the worries you want surfaced</li>
                 </ul>
               </article>
             </div>
@@ -726,6 +768,13 @@ function App() {
                 </label>
               </div>
             </article>
+
+            <RecentUpdateListEditor
+              items={profile.personal.recentUpdates}
+              onAdd={addRecentUpdate}
+              onChange={updateRecentUpdate}
+              onRemove={removeRecentUpdate}
+            />
 
             <div className="patient-memory-editor-grid">
               <PersonalContextListEditor
@@ -1237,6 +1286,116 @@ function PersonalContextListEditor({
   );
 }
 
+function RecentUpdateListEditor({
+  items,
+  onAdd,
+  onChange,
+  onRemove,
+}: {
+  items: RecentUpdateItem[];
+  onAdd: () => void;
+  onChange: (itemId: string, patch: Partial<Omit<RecentUpdateItem, 'id'>>) => void;
+  onRemove: (itemId: string) => void;
+}) {
+  return (
+    <article className="data-card personal-context-card">
+      <div className="section-row personal-context-header">
+        <div>
+          <p className="eyebrow">Recent updates</p>
+          <h3>Log what changed since the last visit or what should be surfaced first</h3>
+          <p className="muted-copy">Keep this fast: new diagnosis, medication change, new symptom, family discovery, or a care access update.</p>
+        </div>
+        <button className="secondary-button compact-button" onClick={onAdd}>
+          Add update
+        </button>
+      </div>
+
+      {items.length === 0 ? <div className="empty-card personal-context-empty">No recent updates recorded yet.</div> : null}
+
+      <div className="personal-context-stack">
+        {items.map((item) => (
+          <article key={item.id} className="personal-context-item-card">
+            <div className="section-row personal-context-item-top">
+              <strong>{item.label.trim() || formatRecentUpdateKindLabel(item.kind)}</strong>
+              <button className="ghost-button compact-button" onClick={() => onRemove(item.id)}>
+                Remove
+              </button>
+            </div>
+            <div className="personal-context-field-grid recent-update-field-grid">
+              <label className="field">
+                <span>Update type</span>
+                <select value={item.kind} onChange={(event) => onChange(item.id, { kind: event.target.value as RecentUpdateItem['kind'] })}>
+                  {RECENT_UPDATE_KIND_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>What changed</span>
+                <input
+                  value={item.label}
+                  onChange={(event) => onChange(item.id, { label: event.target.value })}
+                  placeholder="Ex: Restarted albuterol after more frequent shortness of breath"
+                />
+              </label>
+              <label className="field wide">
+                <span>Detail for the handoff</span>
+                <input
+                  value={item.detail ?? ''}
+                  onChange={(event) => onChange(item.id, { detail: event.target.value })}
+                  placeholder="Ex: Using inhaler most mornings this week, wants this visible before telehealth follow-up"
+                />
+              </label>
+            </div>
+            <div className="fact-review-grid">
+              <label className="field compact-field">
+                <span>Source</span>
+                <select value={item.source} onChange={(event) => onChange(item.id, { source: event.target.value as FactSource })}>
+                  {FACT_SOURCE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field compact-field">
+                <span>Confidence</span>
+                <select value={item.confidence} onChange={(event) => onChange(item.id, { confidence: event.target.value as FactConfidence })}>
+                  {FACT_CONFIDENCE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field compact-field">
+                <span>Share status</span>
+                <select value={item.reviewStatus} onChange={(event) => onChange(item.id, { reviewStatus: event.target.value as FactReviewStatus })}>
+                  {FACT_REVIEW_STATUS_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <label className="field fact-note-field">
+              <span>Note for later review</span>
+              <input
+                value={item.note ?? ''}
+                onChange={(event) => onChange(item.id, { note: event.target.value })}
+                placeholder="Ex: Added from memory after urgent care visit, confirm exact diagnosis later"
+              />
+            </label>
+          </article>
+        ))}
+      </div>
+    </article>
+  );
+}
+
 function ConditionClusterEditor({
   clusterId,
   member,
@@ -1425,10 +1584,12 @@ function OverviewTab({ profile, artifact, doctorNote }: { profile: FamilyHistory
   const medications = getCompletePersonalContextItems(profile.personal.medications);
   const allergies = getCompletePersonalContextItems(profile.personal.allergies);
   const chronicConditions = getCompletePersonalContextItems(profile.personal.chronicConditions);
+  const recentUpdates = getCompleteRecentUpdates(profile.personal.recentUpdates);
   const patientMemoryChips = [
     ...medications.map((item) => `Med: ${item.label}`),
     ...allergies.map((item) => `Allergy: ${item.label}`),
     ...chronicConditions.map((item) => `Condition: ${item.label}`),
+    ...recentUpdates.map((item) => `Update: ${item.label}`),
   ];
 
   return (
@@ -1438,6 +1599,7 @@ function OverviewTab({ profile, artifact, doctorNote }: { profile: FamilyHistory
         <MetricCard label="Second-degree flags" value={artifact.secondDegreeFlags.length} />
         <MetricCard label="Cluster signals" value={clusterSignals.length} />
         <MetricCard label="Patient memory items" value={artifact.patientContextCounts.total} />
+        <MetricCard label="Recent updates" value={artifact.patientContextCounts.recentUpdates} />
         <MetricCard label="Review-ready facts" value={artifact.readyToShareFactCount} />
         <MetricCard label="Needs review" value={artifact.needsFollowupFactCount} />
         <MetricCard label="Follow-up prompts" value={artifact.missingQuestions.length} />
@@ -1524,6 +1686,10 @@ function OverviewTab({ profile, artifact, doctorNote }: { profile: FamilyHistory
               <div>
                 <dt>Chronic conditions</dt>
                 <dd>{artifact.patientContextCounts.chronicConditions}</dd>
+              </div>
+              <div>
+                <dt>Recent updates</dt>
+                <dd>{artifact.patientContextCounts.recentUpdates}</dd>
               </div>
               <div>
                 <dt>Preferred pharmacy</dt>

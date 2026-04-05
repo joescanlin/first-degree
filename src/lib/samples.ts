@@ -2,14 +2,17 @@ import {
   createBlankProfile,
   createFactRecord,
   createPersonalContextItem,
+  createRecentUpdateItem,
   createSibling,
   touchPersonalContextItem,
+  touchRecentUpdateItem,
   touchFact,
   touchProfile,
   type FamilyHistoryFact,
   type FamilyHistoryProfile,
   type FamilyMember,
   type PersonalContextItem,
+  type RecentUpdateItem,
 } from './profile';
 import { type ConditionId } from './taxonomy';
 
@@ -48,6 +51,19 @@ function contextItem(
   patch: Partial<Omit<PersonalContextItem, 'id' | 'kind' | 'label'>> = {},
 ): PersonalContextItem {
   return touchPersonalContextItem(createPersonalContextItem(kind), {
+    label,
+    detail,
+    ...patch,
+  });
+}
+
+function recentUpdate(
+  kind: RecentUpdateItem['kind'],
+  label: string,
+  detail = '',
+  patch: Partial<Omit<RecentUpdateItem, 'id' | 'kind' | 'label'>> = {},
+): RecentUpdateItem {
+  return touchRecentUpdateItem(createRecentUpdateItem(kind), {
     label,
     detail,
     ...patch,
@@ -106,6 +122,10 @@ function cardioSample(): FamilyHistoryProfile {
       medications: [contextItem('medication', 'Atorvastatin', '20 mg nightly')],
       allergies: [contextItem('allergy', 'Penicillin', 'Rash as a child', { confidence: 'uncertain', reviewStatus: 'needs_followup' })],
       chronicConditions: [contextItem('condition', 'High cholesterol', 'Managed with medication')],
+      recentUpdates: [
+        recentUpdate('medication_change', 'Restarted atorvastatin after lapse', 'Back on it nightly after running out for a few weeks.'),
+        recentUpdate('care_update', 'Wants low-cost generic options visible', 'Cost matters if medication plan changes.', { source: 'patient_memory', confidence: 'certain' }),
+      ],
     },
     members: [...members, sibling],
     facts,
@@ -151,6 +171,10 @@ function cancerSample(): FamilyHistoryProfile {
       medications: [contextItem('medication', 'Prenatal vitamin', 'Daily')],
       allergies: [contextItem('allergy', 'Sulfa antibiotics', 'Hives')],
       chronicConditions: [contextItem('condition', 'Migraine history', 'A few flares each month')],
+      recentUpdates: [
+        recentUpdate('family_discovery', 'Confirmed maternal ovarian cancer age from aunt', 'Maternal grandmother was reportedly diagnosed around 59.'),
+        recentUpdate('care_update', 'Trying to conceive this year', 'Wants this visible in preventive and medication discussions.', { source: 'patient_memory', confidence: 'certain' }),
+      ],
     },
     members: [...members, sibling],
     facts: [
@@ -199,6 +223,12 @@ function mixedSample(): FamilyHistoryProfile {
       medications: [],
       allergies: [contextItem('allergy', 'Latex', 'Skin irritation', { confidence: 'likely' })],
       chronicConditions: [],
+      recentUpdates: [
+        recentUpdate('new_symptom', 'Occasional dizziness during the week', 'Not severe, but wants it mentioned if a telehealth visit happens soon.', {
+          source: 'patient_memory',
+          confidence: 'likely',
+        }),
+      ],
     },
     members,
     facts: [
@@ -263,6 +293,21 @@ function medCanonDemoSample(): FamilyHistoryProfile {
       chronicConditions: [
         contextItem('condition', 'Asthma', 'Mild intermittent', { source: 'medical_record', confidence: 'certain' }),
         contextItem('condition', 'Migraine', 'A few episodes most months', { source: 'patient_memory', confidence: 'likely' }),
+      ],
+      recentUpdates: [
+        recentUpdate('new_symptom', 'Chest pressure with stairs this week', 'Not constant, but wants it visible in case of acute telehealth triage.', {
+          source: 'patient_memory',
+          confidence: 'likely',
+          reviewStatus: 'needs_followup',
+        }),
+        recentUpdate('medication_change', 'Using albuterol more often before exercise', 'Now using it most mornings before running.', {
+          source: 'patient_memory',
+          confidence: 'likely',
+        }),
+        recentUpdate('family_discovery', 'Mother breast cancer age confirmed from old records', 'Age 46 now documented instead of approximate memory.', {
+          source: 'medical_record',
+          confidence: 'certain',
+        }),
       ],
     },
     members: [...members, sibling],

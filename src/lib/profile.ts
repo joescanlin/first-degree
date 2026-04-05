@@ -19,6 +19,13 @@ export type FactSource = 'patient_memory' | 'family_report' | 'medical_record' |
 export type FactConfidence = 'certain' | 'likely' | 'uncertain';
 export type FactReviewStatus = 'ready_to_share' | 'needs_followup';
 export type PersonalContextKind = 'medication' | 'allergy' | 'condition';
+export type RecentUpdateKind =
+  | 'new_diagnosis'
+  | 'medication_change'
+  | 'new_symptom'
+  | 'family_discovery'
+  | 'care_update'
+  | 'document_upload';
 export type PregnancyContext =
   | ''
   | 'could_be_pregnant'
@@ -69,6 +76,18 @@ export interface PersonalContextItem {
   lastUpdatedAt: string;
 }
 
+export interface RecentUpdateItem {
+  id: string;
+  kind: RecentUpdateKind;
+  label: string;
+  detail?: string;
+  source: FactSource;
+  confidence: FactConfidence;
+  reviewStatus: FactReviewStatus;
+  note?: string;
+  lastUpdatedAt: string;
+}
+
 export interface PersonalProfile {
   nameOrLabel: string;
   ageRange: string;
@@ -88,6 +107,7 @@ export interface PersonalProfile {
   medications: PersonalContextItem[];
   allergies: PersonalContextItem[];
   chronicConditions: PersonalContextItem[];
+  recentUpdates: RecentUpdateItem[];
 }
 
 export interface FamilyHistoryProfile {
@@ -151,6 +171,19 @@ const personalSchema = z.object({
     z.object({
       id: z.string(),
       kind: z.enum(['medication', 'allergy', 'condition']),
+      label: z.string(),
+      detail: z.string().optional(),
+      source: z.enum(['patient_memory', 'family_report', 'medical_record', 'clinician_confirmed', 'unknown']).optional(),
+      confidence: z.enum(['certain', 'likely', 'uncertain']).optional(),
+      reviewStatus: z.enum(['ready_to_share', 'needs_followup']).optional(),
+      note: z.string().optional(),
+      lastUpdatedAt: z.string().optional(),
+    }),
+  ).optional(),
+  recentUpdates: z.array(
+    z.object({
+      id: z.string(),
+      kind: z.enum(['new_diagnosis', 'medication_change', 'new_symptom', 'family_discovery', 'care_update', 'document_upload']),
       label: z.string(),
       detail: z.string().optional(),
       source: z.enum(['patient_memory', 'family_report', 'medical_record', 'clinician_confirmed', 'unknown']).optional(),
@@ -314,6 +347,14 @@ export const PERSONAL_CONTEXT_KIND_LABELS: Record<PersonalContextKind, string> =
   allergy: 'Allergy',
   condition: 'Chronic condition',
 };
+export const RECENT_UPDATE_KIND_OPTIONS: Array<{ value: RecentUpdateKind; label: string }> = [
+  { value: 'new_diagnosis', label: 'New diagnosis' },
+  { value: 'medication_change', label: 'Medication change' },
+  { value: 'new_symptom', label: 'New symptom' },
+  { value: 'family_discovery', label: 'Family discovery' },
+  { value: 'care_update', label: 'Care update' },
+  { value: 'document_upload', label: 'Document added' },
+];
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -366,6 +407,30 @@ function normalizePersonalContextItem(value: {
   };
 }
 
+function normalizeRecentUpdateItem(value: {
+  id: string;
+  kind: RecentUpdateKind;
+  label: string;
+  detail?: string;
+  source?: FactSource;
+  confidence?: FactConfidence;
+  reviewStatus?: FactReviewStatus;
+  note?: string;
+  lastUpdatedAt?: string;
+}): RecentUpdateItem {
+  return {
+    id: value.id,
+    kind: value.kind,
+    label: value.label ?? '',
+    detail: value.detail ?? '',
+    source: value.source ?? 'patient_memory',
+    confidence: value.confidence ?? 'likely',
+    reviewStatus: value.reviewStatus ?? 'ready_to_share',
+    note: value.note ?? '',
+    lastUpdatedAt: value.lastUpdatedAt ?? nowIso(),
+  };
+}
+
 function normalizePersonal(value: z.infer<typeof personalSchema>): PersonalProfile {
   return {
     nameOrLabel: value.nameOrLabel ?? '',
@@ -386,6 +451,7 @@ function normalizePersonal(value: z.infer<typeof personalSchema>): PersonalProfi
     medications: (value.medications ?? []).map((item) => normalizePersonalContextItem({ ...item, kind: 'medication' })),
     allergies: (value.allergies ?? []).map((item) => normalizePersonalContextItem({ ...item, kind: 'allergy' })),
     chronicConditions: (value.chronicConditions ?? []).map((item) => normalizePersonalContextItem({ ...item, kind: 'condition' })),
+    recentUpdates: (value.recentUpdates ?? []).map((item) => normalizeRecentUpdateItem(item)),
   };
 }
 
@@ -415,6 +481,7 @@ export function createBlankProfile(): FamilyHistoryProfile {
       medications: [],
       allergies: [],
       chronicConditions: [],
+      recentUpdates: [],
     },
     members: cloneFixedMembers(),
     facts: [],
@@ -485,6 +552,20 @@ export function createPersonalContextItem(kind: PersonalContextKind): PersonalCo
   });
 }
 
+export function createRecentUpdateItem(kind: RecentUpdateKind = 'new_symptom'): RecentUpdateItem {
+  return normalizeRecentUpdateItem({
+    id: `update-${Math.random().toString(36).slice(2, 8)}-${Date.now().toString(36)}`,
+    kind,
+    label: '',
+    detail: '',
+    source: 'patient_memory',
+    confidence: 'likely',
+    reviewStatus: 'ready_to_share',
+    note: '',
+    lastUpdatedAt: nowIso(),
+  });
+}
+
 export function touchFact(
   fact: FamilyHistoryFact,
   patch: Partial<Omit<FamilyHistoryFact, 'id' | 'memberId' | 'conditionId'>>,
@@ -507,11 +588,26 @@ export function touchPersonalContextItem(
   });
 }
 
+export function touchRecentUpdateItem(
+  item: RecentUpdateItem,
+  patch: Partial<Omit<RecentUpdateItem, 'id'>>,
+): RecentUpdateItem {
+  return normalizeRecentUpdateItem({
+    ...item,
+    ...patch,
+    lastUpdatedAt: nowIso(),
+  });
+}
+
 export function factNeedsFollowup(fact: FamilyHistoryFact): boolean {
   return fact.reviewStatus === 'needs_followup' || fact.confidence === 'uncertain' || fact.source === 'unknown';
 }
 
 export function personalContextItemNeedsFollowup(item: PersonalContextItem): boolean {
+  return item.reviewStatus === 'needs_followup' || item.confidence === 'uncertain' || item.source === 'unknown';
+}
+
+export function recentUpdateNeedsFollowup(item: RecentUpdateItem): boolean {
   return item.reviewStatus === 'needs_followup' || item.confidence === 'uncertain' || item.source === 'unknown';
 }
 
@@ -531,6 +627,10 @@ export function formatPersonalContextKindLabel(kind: PersonalContextKind): strin
   return PERSONAL_CONTEXT_KIND_LABELS[kind];
 }
 
+export function formatRecentUpdateKindLabel(kind: RecentUpdateKind): string {
+  return RECENT_UPDATE_KIND_OPTIONS.find((option) => option.value === kind)?.label ?? kind;
+}
+
 export function formatPregnancyContextLabel(value: PregnancyContext): string {
   return PREGNANCY_CONTEXT_OPTIONS.find((option) => option.value === value)?.label ?? value;
 }
@@ -544,6 +644,10 @@ export function formatAlcoholUseLabel(value: AlcoholUse): string {
 }
 
 export function getCompletePersonalContextItems(items: PersonalContextItem[]): PersonalContextItem[] {
+  return items.filter((item) => item.label.trim().length > 0);
+}
+
+export function getCompleteRecentUpdates(items: RecentUpdateItem[]): RecentUpdateItem[] {
   return items.filter((item) => item.label.trim().length > 0);
 }
 
